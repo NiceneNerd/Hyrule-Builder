@@ -6,13 +6,13 @@ with open("README.md", "r") as readme:
 
 setup(
     name='hyrule_builder',
-    version='0.1.1',
+    version='0.1.1.post1',
     author='NiceneNerd',
     author_email='macadamiadaze@gmail.com',
     description='A mod builder/unbuilder for The Legend of Zelda: Breath of the Wild',
     long_description=long_description,
     long_description_content_type='text/markdown',
-    url='https://github.com/NiceneNerd/Hyru',
+    url='https://github.com/NiceneNerd/Hyrule-Builder',
     include_package_data=True,
     packages=['hyrule_builder'],
     entry_points={
