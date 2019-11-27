@@ -6,7 +6,7 @@ with open("README.md", "r") as readme:
 
 setup(
     name='hyrule_builder',
-    version='0.1.1.post1',
+    version='0.1.1.post2',
     author='NiceneNerd',
     author_email='macadamiadaze@gmail.com',
     description='A mod builder/unbuilder for The Legend of Zelda: Breath of the Wild',
@@ -17,7 +17,7 @@ setup(
     packages=['hyrule_builder'],
     entry_points={
         'console_scripts': [
-            'hyrule_builder = hyrule_builder.__main__'
+            'hyrule_builder = hyrule_builder.__main__:main'
         ]
     },
     classifiers=[
