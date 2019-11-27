@@ -36,7 +36,9 @@ def _unbuild_file(f: Path, out: Path, mod: Path, verbose: bool):
         print(f'Unbuilt {f.relative_to(mod).as_posix()}')
 
 def _unbuild_sarc(s: sarc.SARC, output: Path):
-    SKIP_SARCS = {'tera_resource.Cafe_Cafe_GX2.release.ssarc'}
+    SKIP_SARCS = {
+        'tera_resource.Cafe_Cafe_GX2.release.ssarc', 'tera_resource.Nin_NX_NVN.release.ssarc'
+    }
 
     output.mkdir(parents=True, exist_ok=True)
     if any(f.startswith('/') for f in s.list_files()):
@@ -87,13 +89,18 @@ def _byml_to_yml(file_bytes: bytes) -> bytes:
 
 def unbuild_mod(args) -> None:
     mod = Path(args.directory)
-    if not ((mod / 'content').exists() or (mod / 'aoc').exists()):
-        print('The specified directory is not valid: no content or aoc folder found')
+    if not any(d.exists() for d in {
+        mod / 'content', mod / 'aoc', \
+        mod / 'atmosphere/titles/01007EF00011E000/romfs', mod / 'atmosphere/titles/01007EF00011F001/romfs'
+    }):
+        print('The specified directory is not valid: no base or DLC folder found')
         exit(1)
     out = mod.with_name(f'{mod.name}_unbuilt') if not args.output else Path(args.output)
 
+    print('Analying files...')
     files = {f for f in mod.rglob('**/*') if f.is_file()}
     t = min(len(files), cpu_count())
+    print('Unbuilding...')
     if args.single or t < 2:
         for f in files:
             _unbuild_file(f, out, mod, args.verbose)

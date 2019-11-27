@@ -22,6 +22,8 @@ from . import AAMP_EXTS, BYML_EXTS, SARC_EXTS, EXEC_DIR, guess, decompress, comp
 class BuildParams:
     mod: Path
     out: Path
+    content: str
+    aoc: str
     be: bool
     guess: bool
     verbose: bool
@@ -31,8 +33,16 @@ def _is_in_sarc(f: Path) -> bool:
     return any(Path(p).suffix in SARC_EXTS for p in f.parts[:-1])
 
 def _get_canon_name(file: str, allow_no_source: bool = False) -> str:
-    name = str(file).replace("\\", "/").replace('.s', '.')\
-        .replace('Content', 'content').replace('Aoc', 'aoc')
+    name = str(file)\
+        .replace("\\", "/")\
+        .replace('atmosphere/titles/01007EF00011E000/romfs', 'content')\
+        .replace('atmosphere/titles/01007EF00011E001/romfs', 'aoc/0010')\
+        .replace('atmosphere/titles/01007EF00011E002/romfs', 'aoc/0010')\
+        .replace('atmosphere/titles/01007EF00011F001/romfs', 'aoc/0010')\
+        .replace('atmosphere/titles/01007EF00011F002/romfs', 'aoc/0010')\
+        .replace('.s', '.')\
+        .replace('Content', 'content')\
+        .replace('Aoc', 'aoc')
     if 'aoc/' in name:
         return name.replace('aoc/content', 'aoc').replace('aoc', 'Aoc')
     elif 'content/' in name and '/aoc' not in name:
@@ -122,7 +132,7 @@ def _build_yml(f: Path, params: BuildParams):
                     canon: _get_rstb_val(t.suffix.replace('.s', ''), data, params.guess, params.be)
                 }
         t.write_bytes(data if not t.suffix.startswith('.s') else compress(data))
-    except:
+    except Exception as e:
         print(f'Failed to build {f.relative_to(params.mod).as_posix()}')
         return {}
     else:
@@ -181,8 +191,10 @@ def _build_sarc(d: Path, params: BuildParams):
         return rvs
 
 def build_mod(args):
+    content = 'content' if args.be else 'atmosphere/titles/01007EF00011E000/romfs'
+    aoc = 'aoc' if args.be else 'atmosphere/titles/01007EF00011F001/romfs'
     mod = Path(args.directory)
-    if not ((mod / 'content').exists() or (mod / 'aoc').exists()):
+    if not ((mod / content).exists() or (mod / aoc).exists()):
         print('The specified directory is not valid: no content or aoc folder found')
         exit(1)
     out = mod.with_name(f'{mod.name}_build') if not args.output else Path(args.output)
@@ -193,7 +205,8 @@ def build_mod(args):
     print('Loading hash table...')
     ver = 'wiiu' if args.be else 'switch'
     hashes = json.loads((EXEC_DIR / 'data' / ver / 'hashes.json').read_text())
-    params = BuildParams(mod, out, args.be, not args.no_guess, args.verbose, hashes)
+    params = BuildParams(mod=mod, out=out, be=args.be, guess=not args.no_guess, 
+                         verbose=args.verbose, hashes=hashes, content=content, aoc=aoc)
 
     print('Scanning source files...')
     files = {f for f in mod.rglob('**/*') if f.is_file()}
@@ -215,7 +228,7 @@ def build_mod(args):
             rvs.update(r)
 
     if (mod / 'content').exists():
-        msg_dirs = {d for d in mod.glob('content/Pack/Bootup_*.pack') \
+        msg_dirs = {d for d in mod.glob(f'{content}/Pack/Bootup_*.pack') \
                     if d.is_dir() and not d.name == 'Bootup_Graphics.pack'}
         if msg_dirs:
             print('Building MSBT files...')
@@ -263,7 +276,7 @@ def build_mod(args):
 
     if rvs:
         print('Updating RSTB...')
-        rp = out / 'content' / 'System' / 'Resource' / 'ResourceSizeTable.product.srsizetable'
+        rp = out / content / 'System' / 'Resource' / 'ResourceSizeTable.product.srsizetable'
         table: ResourceSizeTable
         if rp.exists():
             table = ResourceSizeTable(decompress(rp.read_bytes()), args.be)
@@ -272,6 +285,7 @@ def build_mod(args):
         for p, v in rvs.items():
             if not p:
                 continue
+            msg: str
             if table.is_in_table(p):
                 if v > table.get_size(p) > 0:
                     table.set_size(p, v)
