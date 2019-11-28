@@ -7,6 +7,7 @@ from pathlib import Path
 from multiprocessing import Pool, cpu_count
 import shutil
 import yaml
+from zlib import crc32
 
 import aamp
 from aamp import yaml_util as ay
@@ -14,6 +15,7 @@ import byml
 from byml import yaml_util as by
 import pymsyt
 from rstb import SizeCalculator, ResourceSizeTable
+from rstb.util import write_rstb
 import sarc
 from xxhash import xxh32
 from . import AAMP_EXTS, BYML_EXTS, SARC_EXTS, EXEC_DIR, guess, decompress, compress
@@ -50,11 +52,20 @@ def _get_canon_name(file: str, allow_no_source: bool = False) -> str:
     elif allow_no_source:
         return name
 
-def _load_rstb(be: bool) -> ResourceSizeTable:
+def _load_rstb(be: bool, file: Path = None) -> ResourceSizeTable:
     table = ResourceSizeTable(b'', be=be)
-    ver = 'wiiu' if be else 'switch'
-    ref_contents = json.loads((EXEC_DIR / 'data' / ver / 'rstb.json').read_text(), encoding='utf-8')
-    table.crc32_map = {int(k): v for k, v in ref_contents['hash_map'].items()}
+    if not file:
+        ver = 'wiiu' if be else 'switch'
+        file = EXEC_DIR / 'data' / ver / 'rstb.json'
+    ref_contents = json.loads(file.read_text(), encoding='utf-8')
+
+    def parse_hash(file: str) -> int:
+        try:
+            return int(file)
+        except ValueError:
+            return crc32(file.encode('utf8'))
+
+    table.crc32_map = {parse_hash(k): v for k, v in ref_contents['hash_map'].items()}
     table.name_map = {k: v for k, v in ref_contents['name_map'].items()}
     return table
 
@@ -133,7 +144,7 @@ def _build_yml(f: Path, params: BuildParams):
                 }
         t.write_bytes(data if not t.suffix.startswith('.s') else compress(data))
     except Exception as e:
-        print(f'Failed to build {f.relative_to(params.mod).as_posix()}')
+        print(f'Failed to build {f.relative_to(params.mod).as_posix()}: {e}')
         return {}
     else:
         if params.verbose:
@@ -276,10 +287,10 @@ def build_mod(args):
 
     if rvs:
         print('Updating RSTB...')
-        rp = out / content / 'System' / 'Resource' / 'ResourceSizeTable.product.srsizetable'
+        rp = out / content / 'System' / 'Resource' / 'ResourceSizeTable.product.json'
         table: ResourceSizeTable
         if rp.exists():
-            table = ResourceSizeTable(decompress(rp.read_bytes()), args.be)
+            table = _load_rstb(args.be, file=rp)
         else:
             table = _load_rstb(args.be)
         for p, v in rvs.items():
@@ -301,5 +312,7 @@ def build_mod(args):
                     msg = f'Added {p}, set to {v}'
             if args.verbose and msg:
                 print(msg)
+        write_rstb(table, str(rp.with_suffix('.srsizetable')), args.be)
+        rp.unlink()
 
     print('Mod built successfully')
