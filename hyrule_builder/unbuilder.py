@@ -4,6 +4,7 @@ from multiprocessing import Pool, cpu_count
 from pathlib import Path
 from shutil import rmtree
 from typing import Union
+from zlib import crc32
 
 import aamp.converters as ac
 import byml
@@ -41,11 +42,16 @@ def _unbuild_file(f: Path, out: Path, mod: Path, be: bool, verbose: bool):
 
 def _unbuild_rstb(f: Path, be: bool, out: Path, mod: Path):
     import json
-    hash_map = json.loads((EXEC_DIR / 'data' / 'rstb_entries.json').read_text(encoding='utf-8'))
+    ver = 'wiiu' if be else 'switch'
+    hash_map = {
+        crc32(h.encode('utf8')): h for h in json.loads(
+            (EXEC_DIR / 'data' / ver / 'hashes.json').read_text(encoding='utf-8')
+        )
+    }
     table = read_rstb(str(f), be)
 
     def hash_to_name(crc: int) -> Union[str, int]:
-        return hash_map[str(crc)] if str(crc) in hash_map else crc
+        return hash_map[crc] if crc in hash_map else crc
 
     (out / f.relative_to(mod).with_suffix('.json')).write_text(
         json.dumps({
