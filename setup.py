@@ -6,7 +6,7 @@ with open("README.md", "r") as readme:
 
 setup(
     name='hyrule_builder',
-    version='0.2.1',
+    version='0.2.3',
     author='NiceneNerd',
     author_email='macadamiadaze@gmail.com',
     description='A mod builder/unbuilder for The Legend of Zelda: Breath of the Wild',
