@@ -29,6 +29,24 @@ BYML_EXTS = {'.bgdata', '.sbgdata', '.bquestpack', '.sbquestpack', '.byml', '.sb
              '.sbgsvdata'}
 EXEC_DIR = Path(os.path.dirname(os.path.realpath(__file__)))
 
+def get_canon_name(file: str, allow_no_source: bool = False) -> str:
+    name = str(file)\
+        .replace("\\", "/")\
+        .replace('atmosphere/titles/01007EF00011E000/romfs', 'content')\
+        .replace('atmosphere/titles/01007EF00011E001/romfs', 'aoc/0010')\
+        .replace('atmosphere/titles/01007EF00011E002/romfs', 'aoc/0010')\
+        .replace('atmosphere/titles/01007EF00011F001/romfs', 'aoc/0010')\
+        .replace('atmosphere/titles/01007EF00011F002/romfs', 'aoc/0010')\
+        .replace('.s', '.')\
+        .replace('Content', 'content')\
+        .replace('Aoc', 'aoc')
+    if 'aoc/' in name:
+        return name.replace('aoc/content', 'aoc').replace('aoc', 'Aoc')
+    elif 'content/' in name and '/aoc' not in name:
+        return name.replace('content/', '')
+    elif allow_no_source:
+        return name
+
 try:
     import libyaz0.yaz0_cy
     decompress = libyaz0.yaz0_cy.DecompressYaz

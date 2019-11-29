@@ -18,7 +18,7 @@ from rstb import SizeCalculator, ResourceSizeTable
 from rstb.util import write_rstb
 import sarc
 from xxhash import xxh32
-from . import AAMP_EXTS, BYML_EXTS, SARC_EXTS, EXEC_DIR, guess, decompress, compress
+from . import AAMP_EXTS, BYML_EXTS, SARC_EXTS, EXEC_DIR, guess, decompress, compress, get_canon_name
 
 @dataclass
 class BuildParams:
@@ -33,24 +33,6 @@ class BuildParams:
 
 def _is_in_sarc(f: Path) -> bool:
     return any(Path(p).suffix in SARC_EXTS for p in f.parts[:-1])
-
-def _get_canon_name(file: str, allow_no_source: bool = False) -> str:
-    name = str(file)\
-        .replace("\\", "/")\
-        .replace('atmosphere/titles/01007EF00011E000/romfs', 'content')\
-        .replace('atmosphere/titles/01007EF00011E001/romfs', 'aoc/0010')\
-        .replace('atmosphere/titles/01007EF00011E002/romfs', 'aoc/0010')\
-        .replace('atmosphere/titles/01007EF00011F001/romfs', 'aoc/0010')\
-        .replace('atmosphere/titles/01007EF00011F002/romfs', 'aoc/0010')\
-        .replace('.s', '.')\
-        .replace('Content', 'content')\
-        .replace('Aoc', 'aoc')
-    if 'aoc/' in name:
-        return name.replace('aoc/content', 'aoc').replace('aoc', 'Aoc')
-    elif 'content/' in name and '/aoc' not in name:
-        return name.replace('content/', '')
-    elif allow_no_source:
-        return name
 
 def _load_rstb(be: bool, file: Path = None) -> ResourceSizeTable:
     table = ResourceSizeTable(b'', be=be)
@@ -89,7 +71,7 @@ def _copy_file(f: Path, params: BuildParams):
         return {}
     else:
         data = f.read_bytes()
-        canon = _get_canon_name(f.relative_to(params.mod).as_posix())
+        canon = get_canon_name(f.relative_to(params.mod).as_posix())
         xh = xxh32(
             data if not data[0:4] == b'Yaz0' else decompress(data)
         ).hexdigest()
@@ -135,7 +117,7 @@ def _build_yml(f: Path, params: BuildParams):
         elif ext in AAMP_EXTS:
             data = _build_aamp(f)
         if not _is_in_sarc(f):
-            canon = _get_canon_name(t.relative_to(params.out).as_posix())
+            canon = get_canon_name(t.relative_to(params.out).as_posix())
             xh = xxh32(data).hexdigest()
             if (canon in params.hashes and xh not in params.hashes[canon]) \
                or canon not in params.hashes:
@@ -174,7 +156,7 @@ def _build_sarc(d: Path, params: BuildParams):
             if ((canon in params.hashes and xhash not in params.hashes[canon]) \
                or canon not in params.hashes) and not d.suffix in {'.ssarc', '.sarc'}:
                 rvs.update({
-                    _get_canon_name(path, allow_no_source=True): _get_rstb_val(
+                    get_canon_name(path, allow_no_source=True): _get_rstb_val(
                         Path(path).suffix, data, params.guess, params.be
                     )
                 })
@@ -183,11 +165,11 @@ def _build_sarc(d: Path, params: BuildParams):
 
         shutil.rmtree(d)
         sb = s.get_bytes()
-        canon = _get_canon_name(d.relative_to(params.out).as_posix())
+        canon = get_canon_name(d.relative_to(params.out).as_posix())
         if (canon in params.hashes and xxh32(sb).hexdigest() not in params.hashes[canon]) \
            or canon not in params.hashes and not _is_in_sarc(d):
             rvs.update({
-                _get_canon_name(d.relative_to(params.out).as_posix()): _get_rstb_val(
+                get_canon_name(d.relative_to(params.out).as_posix()): _get_rstb_val(
                     d.suffix, sb, params.guess, params.be
                 )
             })
@@ -216,7 +198,7 @@ def build_mod(args):
     print('Loading hash table...')
     ver = 'wiiu' if args.be else 'switch'
     hashes = json.loads((EXEC_DIR / 'data' / ver / 'hashes.json').read_text())
-    params = BuildParams(mod=mod, out=out, be=args.be, guess=not args.no_guess, 
+    params = BuildParams(mod=mod, out=out, be=args.be, guess=not args.no_guess,
                          verbose=args.verbose, hashes=hashes, content=content, aoc=aoc)
 
     print('Scanning source files...')
@@ -289,29 +271,33 @@ def build_mod(args):
         print('Updating RSTB...')
         rp = out / content / 'System' / 'Resource' / 'ResourceSizeTable.product.json'
         table: ResourceSizeTable
-        if rp.exists():
-            table = _load_rstb(args.be, file=rp)
+        if args.no_rstb:
+            if rp.exists():
+                table = _load_rstb(args.be, file=rp)
         else:
-            table = _load_rstb(args.be)
-        for p, v in rvs.items():
-            if not p:
-                continue
-            msg: str
-            if table.is_in_table(p):
-                if v > table.get_size(p) > 0:
-                    table.set_size(p, v)
-                    msg = f'Updated {p} to {v}'
-                elif v == 0:
-                    table.delete_entry(p)
-                    msg = f'Deleted {p}'
-                else:
-                    msg = f'Skipped {p}'
+            if rp.exists():
+                table = _load_rstb(args.be, file=rp)
             else:
-                if v > 0 and p not in hashes:
-                    table.set_size(p, v)
-                    msg = f'Added {p}, set to {v}'
-            if args.verbose and msg:
-                print(msg)
+                table = _load_rstb(args.be)
+            for p, v in rvs.items():
+                if not p:
+                    continue
+                msg: str
+                if table.is_in_table(p):
+                    if v > table.get_size(p) > 0:
+                        table.set_size(p, v)
+                        msg = f'Updated {p} to {v}'
+                    elif v == 0:
+                        table.delete_entry(p)
+                        msg = f'Deleted {p}'
+                    else:
+                        msg = f'Skipped {p}'
+                else:
+                    if v > 0 and p not in hashes:
+                        table.set_size(p, v)
+                        msg = f'Added {p}, set to {v}'
+                if args.verbose and msg:
+                    print(msg)
         write_rstb(table, str(rp.with_suffix('.srsizetable')), args.be)
         rp.unlink()
 

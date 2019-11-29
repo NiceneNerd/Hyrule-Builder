@@ -15,6 +15,7 @@ def main() -> None:
         aliases=['b']
     )
     b_parser.add_argument('--be', '-B', help='Use big endian where applicable', action='store_true')
+    b_parser.add_argument('--no-rstb', '-R', help='Do not auto-update RSTB', action='store_true')
     b_parser.add_argument('--no-guess', '-G', help='Do not use RSTB estimates', action='store_true')
     b_parser.add_argument('--output', '-O', help='Output folder for built mod')
     b_parser.set_defaults(func=builder.build_mod)
@@ -28,19 +29,19 @@ def main() -> None:
     u_parser.set_defaults(func=unbuilder.unbuild_mod)
 
     dir_help = """\
-The main mod folder. For Wii U, this must contain a `content` folder and/or an `aoc` folder\
+The main mod folder. For Wii U, this must contain a `content` folder and/or an `aoc` folder \
 (the latter for DLC files). For Switch, you must use the following layout:
 atmosphere
- └─ titles
-    ├─ 01007EF00011E000 (for base game files)
-    │  └─ romfs
-    └─ 01007EF00011F001 (for DLC files)
-       └─ romfs"""
-    for sp in {b_parser, u_parser}:
-        sp.formatter_class = PreserveWhiteSpaceWrapRawTextHelpFormatter
-        sp.add_argument('directory', help=dir_help)
-        sp.add_argument('--single', '-S', help='Run with single thread', action='store_true')
-        sp.add_argument('--verbose', '-V', help='Provide more detailed output', action='store_true')
+└─ titles
+   ├─ 01007EF00011E000 (for base game files)
+   │  └─ romfs
+   └─ 01007EF00011F001 (for DLC files)
+      └─ romfs"""
+    for sub in {b_parser, u_parser}:
+        sub.formatter_class = PreserveWhiteSpaceWrapRawTextHelpFormatter
+        sub.add_argument('directory', help=dir_help)
+        sub.add_argument('--single', '-S', help='Run with single thread', action='store_true')
+        sub.add_argument('--verbose', '-V', help='Provide more detailed output', action='store_true')
 
     args = parser.parse_args()
     args.func(args)
