@@ -85,13 +85,14 @@ def _copy_file(f: Path, params: BuildParams):
             return {}
 
 def _build_byml(f: Path, be: bool):
+    # pylint: disable=no-member
     if not hasattr(_build_byml, 'loader'):
-        _build_byml.loader = yaml.CLoader
+        setattr(_build_byml, 'loader', yaml.CSafeLoader)
         by.add_constructors(_build_byml.loader)
 
     with f.open('r', encoding='utf-8') as bf:
         data = yaml.load(bf, Loader=_build_byml.loader)
-    file_bytes = byml.Writer(data, be).get_bytes()
+    file_bytes = byml.Writer(data, be, version=2).get_bytes()
     return file_bytes
 
 def _build_aamp(f: Path):
@@ -116,6 +117,7 @@ def _build_yml(f: Path, params: BuildParams):
             data = _build_byml(f, params.be)
         elif ext in AAMP_EXTS:
             data = _build_aamp(f)
+        t.write_bytes(data if not t.suffix.startswith('.s') else compress(data))
         if not _is_in_sarc(f):
             canon = get_canon_name(t.relative_to(params.out).as_posix())
             xh = xxh32(data).hexdigest()
@@ -124,7 +126,6 @@ def _build_yml(f: Path, params: BuildParams):
                 return {
                     canon: _get_rstb_val(t.suffix.replace('.s', ''), data, params.guess, params.be)
                 }
-        t.write_bytes(data if not t.suffix.startswith('.s') else compress(data))
     except Exception as e:
         print(f'Failed to build {f.relative_to(params.mod).as_posix()}: {e}')
         return {}
@@ -230,7 +231,7 @@ def build_mod(args):
             new_dir = out / msg_dir.relative_to(mod).with_suffix('.ssarc.ssarc')
             pymsyt.create(msg_dir, new_dir)
 
-    print('Building BYML files...')
+    print('Building AAMP and BYML files...')
     if args.single or len(yml_files) < 2:
         for f in yml_files:
             rvs.update(_build_yml(f, params))
@@ -282,7 +283,7 @@ def build_mod(args):
             for p, v in rvs.items():
                 if not p:
                     continue
-                msg: str
+                msg: str = ''
                 if table.is_in_table(p):
                     if v > table.get_size(p) > 0:
                         table.set_size(p, v)

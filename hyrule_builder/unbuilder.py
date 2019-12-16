@@ -120,7 +120,10 @@ def _byml_to_yml(file_bytes: bytes) -> bytes:
         by.add_representers(_byml_to_yml.dumper)
     return yaml.dump(
         byml.Byml(_if_unyaz(file_bytes)).parse(),
-        Dumper=_byml_to_yml.dumper
+        Dumper=_byml_to_yml.dumper,
+        allow_unicode=True,
+        encoding='utf-8',
+        default_flow_style=False
     ).encode('utf8')
 
 def unbuild_mod(args) -> None:
