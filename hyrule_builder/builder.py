@@ -280,6 +280,7 @@ def build_mod(args):
                 table = _load_rstb(args.be, file=rp)
             else:
                 table = _load_rstb(args.be)
+                rp.parent.mkdir(parents=True, exist_ok=True)
             for p, v in rvs.items():
                 if not p:
                     continue
@@ -300,6 +301,7 @@ def build_mod(args):
                 if args.verbose and msg:
                     print(msg)
         write_rstb(table, str(rp.with_suffix('.srsizetable')), args.be)
-        rp.unlink()
+        if rp.exists():
+            rp.unlink()
 
     print('Mod built successfully')

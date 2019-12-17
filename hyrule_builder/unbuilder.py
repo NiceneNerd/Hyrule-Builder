@@ -85,17 +85,7 @@ def _unbuild_sarc(s: sarc.SARC, output: Path):
             osf = output / sf[1:]
         osf.parent.mkdir(parents=True, exist_ok=True)
         ext = osf.suffix
-        if ext not in {*SARC_EXTS, *AAMP_EXTS, *BYML_EXTS}:
-            osf.write_bytes(s.get_file_data(sf).tobytes())
-        elif ext in AAMP_EXTS:
-            osf.with_suffix(f'{osf.suffix}.yml').write_bytes(
-                ac.aamp_to_yml(s.get_file_data(sf).tobytes())
-            )
-        elif ext in BYML_EXTS:
-            osf.with_suffix(f'{osf.suffix}.yml').write_bytes(
-                _byml_to_yml(s.get_file_data(sf).tobytes())
-            )
-        else:
+        if ext in SARC_EXTS:
             if osf.name in SKIP_SARCS:
                 osf.write_bytes(s.get_file_data(sf).tobytes())
                 continue
@@ -105,6 +95,16 @@ def _unbuild_sarc(s: sarc.SARC, output: Path):
                 del ss
             except ValueError:
                 osf.write_bytes(b'')
+        elif ext in AAMP_EXTS:
+            osf.with_suffix(f'{osf.suffix}.yml').write_bytes(
+                ac.aamp_to_yml(s.get_file_data(sf).tobytes())
+            )
+        elif ext in BYML_EXTS:
+            osf.with_suffix(f'{osf.suffix}.yml').write_bytes(
+                _byml_to_yml(s.get_file_data(sf).tobytes())
+            )
+        else:
+            osf.write_bytes(s.get_file_data(sf).tobytes())
 
     if 'Msg_' in output.name:
         pymsyt.export(output, output)
@@ -124,7 +124,7 @@ def _byml_to_yml(file_bytes: bytes) -> bytes:
         allow_unicode=True,
         encoding='utf-8',
         default_flow_style=False
-    ).encode('utf8')
+    )
 
 def unbuild_mod(args) -> None:
     mod = Path(args.directory)
