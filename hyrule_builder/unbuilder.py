@@ -1,19 +1,24 @@
 # pylint: disable=invalid-name
 """ Functions for unbuilding BOTW mods """
+from datetime import datetime
 from multiprocessing import Pool, cpu_count
 from pathlib import Path
+from json import dumps
 from shutil import rmtree
 from typing import Union
 from zlib import crc32
 
 import aamp.converters as ac
 import byml
-from byml import yaml_util as by
 import pymsyt
-from rstb.util import read_rstb
 import sarc
 import yaml
-from . import AAMP_EXTS, BYML_EXTS, SARC_EXTS, EXEC_DIR, decompress, get_canon_name
+from byml import yaml_util as by
+from rstb.util import read_rstb
+
+from . import (AAMP_EXTS, BYML_EXTS, EXEC_DIR, SARC_EXTS, decompress,
+               get_canon_name)
+
 
 def _if_unyaz(data: bytes) -> bytes:
     return data if data[0:4] != b'Yaz0' else decompress(data)
@@ -23,7 +28,7 @@ def _unbuild_file(f: Path, out: Path, mod: Path, be: bool, verbose: bool) -> set
     if not of.parent.exists():
         of.parent.mkdir(parents=True, exist_ok=True)
     names = set()
-    canon = get_canon_name(f.relative_to(mod).as_posix())
+    canon = get_canon_name(f.relative_to(mod))
     if canon:
         names.add(canon)
     if f.name == 'ResourceSizeTable.product.srsizetable':
@@ -158,7 +163,7 @@ def unbuild_mod(args) -> None:
         for r in result:
             if r:
                 names.update(r)
-    
+
     content = 'content' if be else 'atmosphere/titles/01007EF00011E000/romfs'
     if (mod / content / 'System' / 'Resource' / 'ResourceSizeTable.product.srsizetable').exists():
         _unbuild_rstb(
@@ -168,5 +173,14 @@ def unbuild_mod(args) -> None:
             mod,
             names
         )
+
+    (out / '.done').write_text(
+        str(datetime.now().timestamp())
+    )
+    try:
+        import os
+        os.system(f'attrib +h "{str(out / ".done")}"')
+    except:
+        pass
 
     print('Unbuilding complete')

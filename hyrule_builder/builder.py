@@ -1,12 +1,11 @@
 # pylint: disable=invalid-name,bare-except
 """ Functions for building BOTW mods """
 from dataclasses import dataclass
+from datetime import datetime
 from functools import partial
 import json
-from pathlib import Path
 from multiprocessing import Pool, cpu_count
 import shutil
-import yaml
 from zlib import crc32
 
 import aamp
@@ -17,8 +16,15 @@ import pymsyt
 from rstb import SizeCalculator, ResourceSizeTable
 from rstb.util import write_rstb
 import sarc
-from xxhash import xxh32
-from . import AAMP_EXTS, BYML_EXTS, SARC_EXTS, EXEC_DIR, guess, decompress, compress, get_canon_name
+from xxhash import xxh64_hexdigest
+import yaml
+from . import (AAMP_EXTS, BYML_EXTS, SARC_EXTS, EXEC_DIR, guess, decompress, compress,
+               get_canon_name, Path, is_in_sarc)
+from .files import STOCK_FILES
+
+RSTB_EXCLUDE_EXTS = ['.pack', '.bgdata', '.txt', '.bgsvdata', '.yml', '.json', '.ps1', '.bak',
+                     '.bat', '.ini', '.png', '.bfstm', '.py', '.sh', '.old', '.stera']
+RSTB_EXCLUDE_NAMES = ['ActorInfo.product.byml', '.done']
 
 @dataclass
 class BuildParams:
@@ -29,10 +35,13 @@ class BuildParams:
     be: bool
     guess: bool
     verbose: bool
-    hashes: dict
+    ch_date: datetime
 
-def _is_in_sarc(f: Path) -> bool:
-    return any(Path(p).suffix in SARC_EXTS for p in f.parts[:-1])
+
+def _should_rstb(f: Path) -> bool:
+    f = f.with_suffix(f.suffix.replace('.s', '.'))
+    return f.suffix not in RSTB_EXCLUDE_EXTS and f.name not in RSTB_EXCLUDE_NAMES
+
 
 def _load_rstb(be: bool, file: Path = None) -> ResourceSizeTable:
     table = ResourceSizeTable(b'', be=be)
@@ -66,23 +75,17 @@ def _copy_file(f: Path, params: BuildParams):
     t = params.out / f.relative_to(params.mod)
     if not t.parent.exists():
         t.parent.mkdir(parents=True, exist_ok=True)
-    if _is_in_sarc(f):
+    if is_in_sarc(f):
         shutil.copy(f, t)
-        return {}
     else:
         data = f.read_bytes()
-        canon = get_canon_name(f.relative_to(params.mod).as_posix())
-        xh = xxh32(
-            data if not data[0:4] == b'Yaz0' else decompress(data)
-        ).hexdigest()
+        canon = get_canon_name(f.relative_to(params.mod))
         t.write_bytes(data)
-        if (canon in params.hashes and xh not in params.hashes[canon]) \
-           or canon not in params.hashes:
-            return {
-                canon: _get_rstb_val(t.suffix, data, params.guess, params.be)
-            }
-        else:
-            return {}
+    if f.modified_date() > params.ch_date and _should_rstb(f):
+        return {
+            canon: _get_rstb_val(t.suffix, data, params.guess, params.be)
+        }
+    return {}
 
 def _build_byml(f: Path, be: bool):
     # pylint: disable=no-member
@@ -118,24 +121,30 @@ def _build_yml(f: Path, params: BuildParams):
         elif ext in AAMP_EXTS:
             data = _build_aamp(f)
         t.write_bytes(data if not t.suffix.startswith('.s') else compress(data))
-        if not _is_in_sarc(f):
-            canon = get_canon_name(t.relative_to(params.out).as_posix())
-            xh = xxh32(data).hexdigest()
-            if (canon in params.hashes and xh not in params.hashes[canon]) \
-               or canon not in params.hashes:
-                return {
-                    canon: _get_rstb_val(t.suffix.replace('.s', ''), data, params.guess, params.be)
-                }
+        if f.modified_date() > params.ch_date and _should_rstb(t):
+            canon = get_canon_name(t.relative_to(params.out))
+            return {
+                canon: _get_rstb_val(
+                    t.suffix.replace('.s', ''), data, params.guess, params.be
+                )
+            }
     except Exception as e:
         print(f'Failed to build {f.relative_to(params.mod).as_posix()}: {e}')
         return {}
-    else:
-        if params.verbose:
-            print(f'Built {f.relative_to(params.mod).as_posix()}')
-        return rv
+    if params.verbose:
+        print(f'Built {f.relative_to(params.mod).as_posix()}')
+    return rv
 
 def _build_sarc(d: Path, params: BuildParams):
     rvs = {}
+    for f in {
+        f for f in (params.mod / d.relative_to(params.out)).rglob('**/*') if f.is_file()
+    }:
+        if f.modified_date() > params.ch_date:
+            modified = True
+            break
+    else:
+        modified = False
     try:
         s = sarc.SARCWriter(params.be)
         lead = ''
@@ -151,26 +160,14 @@ def _build_sarc(d: Path, params: BuildParams):
         for f in {f for f in d.rglob('**/*') if f.is_file()}:
             path = f.relative_to(d).as_posix()
             data = f.read_bytes()
-            xhash = xxh32(data if not data[0:4] == b'Yaz0' \
-                          else decompress(data)).hexdigest()
-            canon = path.replace('.s', '.')
-            if ((canon in params.hashes and xhash not in params.hashes[canon]) \
-               or canon not in params.hashes) and not d.suffix in {'.ssarc', '.sarc'}:
-                rvs.update({
-                    get_canon_name(path, allow_no_source=True): _get_rstb_val(
-                        Path(path).suffix, data, params.guess, params.be
-                    )
-                })
             s.add_file(lead + path, data)
             f.unlink()
 
         shutil.rmtree(d)
         sb = s.get_bytes()
-        canon = get_canon_name(d.relative_to(params.out).as_posix())
-        if (canon in params.hashes and xxh32(sb).hexdigest() not in params.hashes[canon]) \
-           or canon not in params.hashes and not _is_in_sarc(d):
+        if modified and _should_rstb(d):
             rvs.update({
-                get_canon_name(d.relative_to(params.out).as_posix()): _get_rstb_val(
+                get_canon_name(d.relative_to(params.out)): _get_rstb_val(
                     d.suffix, sb, params.guess, params.be
                 )
             })
@@ -196,11 +193,12 @@ def build_mod(args):
         print('Removing old build...')
         shutil.rmtree(out)
 
-    print('Loading hash table...')
-    ver = 'wiiu' if args.be else 'switch'
-    hashes = json.loads((EXEC_DIR / 'data' / ver / 'hashes.json').read_text())
+    ch_date = datetime.fromtimestamp(float(
+        (mod / '.done').read_text()
+    ))
     params = BuildParams(mod=mod, out=out, be=args.be, guess=not args.no_guess,
-                         verbose=args.verbose, hashes=hashes, content=content, aoc=aoc)
+                         verbose=args.verbose, content=content, aoc=aoc,
+                         ch_date=ch_date)
 
     print('Scanning source files...')
     files = {f for f in mod.rglob('**/*') if f.is_file()}
@@ -268,7 +266,7 @@ def build_mod(args):
         p.close()
         p.join()
 
-    if rvs:
+    if rvs and not (len(rvs) == 1 and list(rvs.keys())[0] is None):
         print('Updating RSTB...')
         rp = out / content / 'System' / 'Resource' / 'ResourceSizeTable.product.json'
         table: ResourceSizeTable
@@ -295,7 +293,7 @@ def build_mod(args):
                     else:
                         msg = f'Skipped {p}'
                 else:
-                    if v > 0 and p not in hashes:
+                    if v > 0 and p not in STOCK_FILES:
                         table.set_size(p, v)
                         msg = f'Added {p}, set to {v}'
                 if args.verbose and msg:

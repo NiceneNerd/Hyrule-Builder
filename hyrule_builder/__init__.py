@@ -1,5 +1,6 @@
 # pylint: skip-file
 import os
+from datetime import datetime
 from pathlib import Path
 
 SARC_EXTS = {'.sarc', '.pack', '.bactorpack', '.bmodelsh', '.beventpack', '.stera', '.stats',
@@ -29,8 +30,19 @@ BYML_EXTS = {'.bgdata', '.sbgdata', '.bquestpack', '.sbquestpack', '.byml', '.sb
              '.sbgsvdata'}
 EXEC_DIR = Path(os.path.dirname(os.path.realpath(__file__)))
 
-def get_canon_name(file: str, allow_no_source: bool = False) -> str:
-    name = str(file)\
+def is_in_sarc(f: Path) -> bool:
+    return any(
+        Path(p).suffix in SARC_EXTS for p in f.parts[:-1]
+    )
+
+def get_canon_name(file: Path, allow_no_source: bool = False) -> str:
+    if is_in_sarc(file):
+        parent = next(reversed([
+            p for p in file.parents if p.suffix in SARC_EXTS
+        ]))
+        file = file.relative_to(parent)
+        allow_no_source = True
+    name = file.as_posix()\
         .replace("\\", "/")\
         .replace('atmosphere/titles/01007EF00011E000/romfs', 'content')\
         .replace('atmosphere/titles/01007EF00011E001/romfs', 'aoc/0010')\
@@ -46,6 +58,10 @@ def get_canon_name(file: str, allow_no_source: bool = False) -> str:
         return name.replace('content/', '')
     elif allow_no_source:
         return name
+
+def modified_date(self) -> datetime:
+    return datetime.fromtimestamp(self.stat().st_mtime)
+setattr(Path, 'modified_date', modified_date)
 
 try:
     import libyaz0.yaz0_cy

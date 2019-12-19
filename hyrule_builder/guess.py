@@ -6,7 +6,7 @@ def guess_bfres_size(file: Union[Path, bytes], name: str = '') -> int:
     real_bytes = file if isinstance(file, bytes) else file.read_bytes()
     if real_bytes[0:4] == b'Yaz0':
         real_bytes = wszst_yaz0.decompress(real_bytes)
-    real_size = len(real_bytes)
+    real_size = int(len(real_bytes) * 1.1)
     del real_bytes
     if name == '':
         if isinstance(file, Path):
@@ -77,7 +77,7 @@ def guess_aamp_size(file: Union[Path, bytes], ext: str = '') -> int:
     real_bytes = file if isinstance(file, bytes) else file.read_bytes()
     if real_bytes[0:4] == b'Yaz0':
         real_bytes = wszst_yaz0.decompress(real_bytes)
-    real_size = len(real_bytes)
+    real_size = int(len(real_bytes) * 1.1)
     del real_bytes
     if ext == '':
         if isinstance(file, Path):
