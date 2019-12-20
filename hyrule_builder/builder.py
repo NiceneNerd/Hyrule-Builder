@@ -296,9 +296,9 @@ def build_mod(args):
         p.close()
         p.join()
 
-    if rvs and not (len(rvs) == 1 and list(rvs.keys())[0] is None):
+    rp = out / content / 'System' / 'Resource' / 'ResourceSizeTable.product.json'
+    if rp.exists() or rvs:
         print('Updating RSTB...')
-        rp = out / content / 'System' / 'Resource' / 'ResourceSizeTable.product.json'
         table: ResourceSizeTable
         if args.no_rstb:
             if rp.exists():
@@ -309,25 +309,26 @@ def build_mod(args):
             else:
                 table = _load_rstb(args.be)
                 rp.parent.mkdir(parents=True, exist_ok=True)
-            for p, v in rvs.items():
-                if not p:
-                    continue
-                msg: str = ''
-                if table.is_in_table(p):
-                    if v > table.get_size(p) > 0:
-                        table.set_size(p, v)
-                        msg = f'Updated {p} to {v}'
-                    elif v == 0:
-                        table.delete_entry(p)
-                        msg = f'Deleted {p}'
+            if rvs and not (len(rvs) == 1 and list(rvs.keys())[0] is None):
+                for p, v in rvs.items():
+                    if not p:
+                        continue
+                    msg: str = ''
+                    if table.is_in_table(p):
+                        if v > table.get_size(p) > 0:
+                            table.set_size(p, v)
+                            msg = f'Updated {p} to {v}'
+                        elif v == 0:
+                            table.delete_entry(p)
+                            msg = f'Deleted {p}'
+                        else:
+                            msg = f'Skipped {p}'
                     else:
-                        msg = f'Skipped {p}'
-                else:
-                    if v > 0 and p not in STOCK_FILES:
-                        table.set_size(p, v)
-                        msg = f'Added {p}, set to {v}'
-                if args.verbose and msg:
-                    print(msg)
+                        if v > 0 and p not in STOCK_FILES:
+                            table.set_size(p, v)
+                            msg = f'Added {p}, set to {v}'
+                    if args.verbose and msg:
+                        print(msg)
         write_rstb(table, str(rp.with_suffix('.srsizetable')), args.be)
         if rp.exists():
             rp.unlink()
