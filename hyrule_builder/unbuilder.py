@@ -1,29 +1,28 @@
-# pylint: disable=invalid-name
-""" Functions for unbuilding BOTW mods """
+# pylint: disable=invalid-name,bare-except,missing-docstring
 from datetime import datetime
 from multiprocessing import Pool, cpu_count
 from pathlib import Path
-from json import dumps
 from shutil import rmtree
 from typing import Union
 from zlib import crc32
 
 import aamp.converters as ac
 import byml
+from byml import yaml_util as by
 import pymsyt
 import sarc
 import yaml
-from byml import yaml_util as by
 from rstb.util import read_rstb
 
-from . import (AAMP_EXTS, BYML_EXTS, EXEC_DIR, SARC_EXTS, decompress,
-               get_canon_name)
+from . import (AAMP_EXTS, BYML_EXTS, SARC_EXTS, decompress, get_canon_name)
+from .files import STOCK_FILES
 
+HANDLED = {'ResourceSizeTable.product.srsizetable', 'ActorInfo.product.sbyml'}
 
 def _if_unyaz(data: bytes) -> bytes:
     return data if data[0:4] != b'Yaz0' else decompress(data)
 
-def _unbuild_file(f: Path, out: Path, mod: Path, be: bool, verbose: bool) -> set:
+def _unbuild_file(f: Path, out: Path, mod: Path, verbose: bool) -> set:
     of = out / f.relative_to(mod)
     if not of.parent.exists():
         of.parent.mkdir(parents=True, exist_ok=True)
@@ -31,7 +30,7 @@ def _unbuild_file(f: Path, out: Path, mod: Path, be: bool, verbose: bool) -> set
     canon = get_canon_name(f.relative_to(mod))
     if canon:
         names.add(canon)
-    if f.name == 'ResourceSizeTable.product.srsizetable':
+    if f.name in HANDLED:
         pass
     elif f.suffix in AAMP_EXTS:
         of.with_suffix(f'{f.suffix}.yml').write_bytes(ac.aamp_to_yml(f.read_bytes()))
@@ -50,13 +49,11 @@ def _unbuild_file(f: Path, out: Path, mod: Path, be: bool, verbose: bool) -> set
         print(f'Unbuilt {f.relative_to(mod).as_posix()}')
     return names
 
-def _unbuild_rstb(f: Path, be: bool, out: Path, mod: Path, names: set):
+def _unbuild_rstb(content: Path, be: bool, out: Path, mod: Path, names: set):
+    f = content / 'System' / 'Resource' / 'ResourceSizeTable.product.srsizetable'
     import json
-    ver = 'wiiu' if be else 'switch'
     hash_map = {
-        crc32(h.encode('utf8')): h for h in json.loads(
-            (EXEC_DIR / 'data' / ver / 'hashes.json').read_text(encoding='utf-8')
-        )
+        crc32(h.encode('utf8')): h for h in STOCK_FILES
     }
     hash_map.update({
         crc32(name.encode('utf8')): name for name in names
@@ -66,12 +63,27 @@ def _unbuild_rstb(f: Path, be: bool, out: Path, mod: Path, names: set):
     def hash_to_name(crc: int) -> Union[str, int]:
         return hash_map[crc] if crc in hash_map else crc
 
+    (out / f.relative_to(mod)).parent.mkdir(exist_ok=True, parents=True)
     (out / f.relative_to(mod).with_suffix('.json')).write_text(
         json.dumps({
             'hash_map': {hash_to_name(k): v for k, v in table.crc32_map.items()},
             'name_map': table.name_map
         }, ensure_ascii=False, indent=2)
     )
+
+
+def _unbuild_actorinfo(mod: Path, content: str, out: Path):
+    if not hasattr(_byml_to_yml, 'dumper'):
+        _byml_to_yml.dumper = yaml.CDumper
+        by.add_representers(_byml_to_yml.dumper)
+    file = mod / content / 'Actor' / 'ActorInfo.product.sbyml'
+    actor_info = byml.Byml(decompress(file.read_bytes())).parse()
+    for actor in actor_info['Actors']:
+        output = out / content / 'Actor' / 'ActorInfo' / f"{actor['name']}.info.yml"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(
+            yaml.dump(actor, allow_unicode=True, Dumper=_byml_to_yml.dumper)
+        )
 
 def _unbuild_sarc(s: sarc.SARC, output: Path):
     SKIP_SARCS = {
@@ -152,12 +164,12 @@ def unbuild_mod(args) -> None:
     if args.single or t < 2:
         for f in files:
             names.update(
-                _unbuild_file(f, out, mod, be, args.verbose)
+                _unbuild_file(f, out, mod, args.verbose)
             )
     else:
         from functools import partial
         p = Pool(processes=t)
-        result = p.map(partial(_unbuild_file, mod=mod, be=be, out=out, verbose=args.verbose), files)
+        result = p.map(partial(_unbuild_file, mod=mod, out=out, verbose=args.verbose), files)
         p.close()
         p.join()
         for r in result:
@@ -165,9 +177,15 @@ def unbuild_mod(args) -> None:
                 names.update(r)
 
     content = 'content' if be else 'atmosphere/titles/01007EF00011E000/romfs'
+
+    print('Unpacking actor info...')
+    if (mod / content / 'Actor' / 'ActorInfo.product.sbyml').exists():
+        _unbuild_actorinfo(mod, content, out)
+
+    print('Dumping RSTB...')
     if (mod / content / 'System' / 'Resource' / 'ResourceSizeTable.product.srsizetable').exists():
         _unbuild_rstb(
-            mod / content / 'System' / 'Resource' / 'ResourceSizeTable.product.srsizetable',
+            mod / content,
             be,
             out,
             mod,

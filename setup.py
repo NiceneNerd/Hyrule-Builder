@@ -1,16 +1,16 @@
+# pylint: disable=missing-docstring
 from setuptools import setup
-from pathlib import Path
 
 with open("README.md", "r") as readme:
-    long_description = readme.read()
+    LONG = readme.read()
 
 setup(
     name='hyrule_builder',
-    version='0.2.6',
+    version='0.2.7',
     author='NiceneNerd',
     author_email='macadamiadaze@gmail.com',
     description='A mod builder/unbuilder for The Legend of Zelda: Breath of the Wild',
-    long_description=long_description,
+    long_description=LONG,
     long_description_content_type='text/markdown',
     url='https://github.com/NiceneNerd/Hyrule-Builder',
     include_package_data=True,

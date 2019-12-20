@@ -1,3 +1,4 @@
+# pylint: disable=missing-docstring
 from pathlib import Path
 from typing import Union
 import wszst_yaz0
@@ -16,61 +17,58 @@ def guess_bfres_size(file: Union[Path, bytes], name: str = '') -> int:
     if '.Tex' in name:
         if real_size < 100:
             return real_size * 9
-        elif 100 < real_size <= 2000:
+        if 100 < real_size <= 2000:
             return real_size * 7
-        elif 2000 < real_size <= 3000:
+        if 2000 < real_size <= 3000:
             return real_size * 5
-        elif 3000 < real_size <= 4000:
+        if 3000 < real_size <= 4000:
             return real_size * 4
-        elif 4000 < real_size <= 8500:
+        if 4000 < real_size <= 8500:
             return real_size * 3
-        elif 8500 < real_size <= 12000:
+        if 8500 < real_size <= 12000:
             return real_size * 2
-        elif 12000 < real_size <= 17000:
+        if 12000 < real_size <= 17000:
             return int(real_size * 1.75)
-        elif 17000 < real_size <= 30000:
+        if 17000 < real_size <= 30000:
             return int(real_size * 1.5)
-        elif 30000 < real_size <= 45000:
+        if 30000 < real_size <= 45000:
             return int(real_size * 1.3)
-        elif 45000 < real_size <= 100000:
+        if 45000 < real_size <= 100000:
             return int(real_size * 1.2)
-        elif 100000 < real_size <= 150000:
+        if 100000 < real_size <= 150000:
             return int(real_size * 1.1)
-        elif 150000 < real_size <= 200000:
+        if 150000 < real_size <= 200000:
             return int(real_size * 1.07)
-        elif 200000 < real_size <= 250000:
+        if 200000 < real_size <= 250000:
             return int(real_size * 1.045)
-        elif 250000 < real_size <= 300000:
+        if 250000 < real_size <= 300000:
             return int(real_size * 1.035)
-        elif 300000 < real_size <= 600000:
+        if 300000 < real_size <= 600000:
             return int(real_size * 1.03)
-        elif 600000 < real_size <= 1000000:
+        if 600000 < real_size <= 1000000:
             return int(real_size * 1.015)
-        elif 1000000 < real_size <= 1800000:
+        if 1000000 < real_size <= 1800000:
             return int(real_size * 1.009)
-        elif 1800000 < real_size <= 4500000:
+        if 1800000 < real_size <= 4500000:
             return int(real_size * 1.005)
-        elif 4500000 < real_size <= 6000000:
+        if 4500000 < real_size <= 6000000:
             return int(real_size * 1.002)
-        else:
-            return int(real_size * 1.0015)
-    else:
-        if real_size < 500:
-            return real_size * 7
-        elif 500 < real_size <= 750:
-            return real_size * 4
-        elif 750 < real_size <= 2000:
-            return real_size * 3
-        elif 2000 < real_size <= 400000:
-            return int(real_size * 1.75)
-        elif 400000 < real_size <= 600000:
-            return int(real_size * 1.7)
-        elif 600000 < real_size <= 1500000:
-            return int(real_size * 1.6)
-        elif 1500000 < real_size <= 3000000:
-            return int(real_size * 1.5)
-        else:
-            return int(real_size * 1.25)
+        return int(real_size * 1.0015)
+    if real_size < 500:
+        return real_size * 7
+    if 500 < real_size <= 750:
+        return real_size * 4
+    if 750 < real_size <= 2000:
+        return real_size * 3
+    if 2000 < real_size <= 400000:
+        return int(real_size * 1.75)
+    if 400000 < real_size <= 600000:
+        return int(real_size * 1.7)
+    if 600000 < real_size <= 1500000:
+        return int(real_size * 1.6)
+    if 1500000 < real_size <= 3000000:
+        return int(real_size * 1.5)
+    return int(real_size * 1.25)
 
 
 def guess_aamp_size(file: Union[Path, bytes], ext: str = '') -> int:
@@ -88,110 +86,101 @@ def guess_aamp_size(file: Union[Path, bytes], ext: str = '') -> int:
     if ext == '.baiprog':
         if real_size <= 380:
             return real_size * 7
-        elif 380 < real_size <= 400:
+        if 380 < real_size <= 400:
             return real_size * 6
-        elif 400 < real_size <= 450:
+        if 400 < real_size <= 450:
             return int(real_size * 5.5)
-        elif 450 < real_size <= 600:
+        if 450 < real_size <= 600:
             return real_size * 5
-        elif 600 < real_size <= 1000:
+        if 600 < real_size <= 1000:
             return real_size * 4
-        elif 1000 < real_size <= 1750:
+        if 1000 < real_size <= 1750:
             return int(real_size * 3.5)
-        else:
-            return real_size * 3
-    elif ext == '.bgparamlist':
+        return real_size * 3
+    if ext == '.bgparamlist':
         if real_size <= 100:
             return real_size * 20
-        elif 100 < real_size <= 150:
+        if 100 < real_size <= 150:
             return real_size * 12
-        elif 150 < real_size <= 250:
+        if 150 < real_size <= 250:
             return real_size * 10
-        elif 250 < real_size <= 350:
+        if 250 < real_size <= 350:
             return real_size * 8
-        elif 350 < real_size <= 450:
+        if 350 < real_size <= 450:
             return real_size * 7
-        else:
-            return real_size * 6
-    elif ext == '.bdrop':
+        return real_size * 6
+    if ext == '.bdrop':
         if real_size < 200:
             return int(real_size * 8.5)
-        elif 200 < real_size <= 250:
+        if 200 < real_size <= 250:
             return real_size * 7
-        elif 250 < real_size <= 350:
+        if 250 < real_size <= 350:
             return real_size * 6
-        elif 350 < real_size <= 450:
+        if 350 < real_size <= 450:
             return int(real_size * 5.25)
-        elif 450 < real_size <= 850:
+        if 450 < real_size <= 850:
             return int(real_size * 4.5)
-        else:
-            return real_size * 4
-    elif ext == '.bxml':
+        return real_size * 4
+    if ext == '.bxml':
         if real_size < 350:
             return real_size * 6
-        elif 350 < real_size <= 450:
+        if 350 < real_size <= 450:
             return real_size * 5
-        elif 450 < real_size <= 550:
+        if 450 < real_size <= 550:
             return int(real_size * 4.5)
-        elif 550 < real_size <= 650:
+        if 550 < real_size <= 650:
             return real_size * 4
-        elif 650 < real_size <= 800:
+        if 650 < real_size <= 800:
             return int(real_size * 3.5)
-        else:
-            return real_size * 3
-    elif ext == '.brecipe':
+        return real_size * 3
+    if ext == '.brecipe':
         if real_size < 100:
             return int(real_size * 12.5)
-        elif 100 < real_size <= 160:
+        if 100 < real_size <= 160:
             return int(real_size * 8.5)
-        elif 160 < real_size <= 200:
+        if 160 < real_size <= 200:
             return int(real_size * 7.5)
-        elif 200 < real_size <= 215:
+        if 200 < real_size <= 215:
             return real_size * 7
-        else:
-            return int(real_size * 6.5)
-    elif ext == '.bshop':
+        return int(real_size * 6.5)
+    if ext == '.bshop':
         if real_size < 200:
             return int(real_size * 7.25)
-        elif 200 < real_size <= 400:
+        if 200 < real_size <= 400:
             return real_size * 6
-        elif 400 < real_size <= 500:
+        if 400 < real_size <= 500:
             return real_size * 5
-        else:
-            return int(real_size * 4.05)
-    elif ext == '.bas':
+        return int(real_size * 4.05)
+    if ext == '.bas':
         if real_size < 100:
             return real_size * 20
-        elif 100 < real_size <= 200:
+        if 100 < real_size <= 200:
             return int(real_size * 12.5)
-        elif 200 < real_size <= 300:
+        if 200 < real_size <= 300:
             return real_size * 10
-        elif 300 < real_size <= 600:
+        if 300 < real_size <= 600:
             return real_size * 8
-        elif 600 < real_size <= 1500:
+        if 600 < real_size <= 1500:
             return real_size * 6
-        elif 1500 < real_size <= 2000:
+        if 1500 < real_size <= 2000:
             return int(real_size * 5.5)
-        elif 2000 < real_size <= 15000:
+        if 2000 < real_size <= 15000:
             return real_size * 5
-        else:
-            return int(real_size * 4.5)
-    elif ext == '.baslist':
+        return int(real_size * 4.5)
+    if ext == '.baslist':
         if real_size < 100:
             return real_size * 15
-        elif 100 < real_size <= 200:
+        if 100 < real_size <= 200:
             return real_size * 10
-        elif 200 < real_size <= 300:
+        if 200 < real_size <= 300:
             return real_size * 8
-        elif 300 < real_size <= 500:
+        if 300 < real_size <= 500:
             return real_size * 6
-        elif 500 < real_size <= 800:
+        if 500 < real_size <= 800:
             return real_size * 5
-        elif 800 < real_size <= 4000:
+        if 800 < real_size <= 4000:
             return real_size * 4
-        else:
-            return int(real_size * 3.5)
-    elif ext == '.bdmgparam':
+        return int(real_size * 3.5)
+    if ext == '.bdmgparam':
         return int(((-0.0018 * real_size) + 6.6273) * real_size) + 500
-    else:
-        return 0
+    return 0

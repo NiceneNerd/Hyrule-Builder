@@ -1,4 +1,4 @@
-# pylint: skip-file
+# pylint: disable=missing-docstring,invalid-name
 import os
 from datetime import datetime
 from pathlib import Path
@@ -30,9 +30,9 @@ BYML_EXTS = {'.bgdata', '.sbgdata', '.bquestpack', '.sbquestpack', '.byml', '.sb
              '.sbgsvdata'}
 EXEC_DIR = Path(os.path.dirname(os.path.realpath(__file__)))
 
-def is_in_sarc(f: Path) -> bool:
+def is_in_sarc(file: Path) -> bool:
     return any(
-        Path(p).suffix in SARC_EXTS for p in f.parts[:-1]
+        Path(p).suffix in SARC_EXTS for p in file.parts[:-1]
     )
 
 def get_canon_name(file: Path, allow_no_source: bool = False) -> str:
@@ -64,6 +64,7 @@ def modified_date(self) -> datetime:
 setattr(Path, 'modified_date', modified_date)
 
 try:
+    # pylint: disable=no-member
     import libyaz0.yaz0_cy
     decompress = libyaz0.yaz0_cy.DecompressYaz
     def compress(data: bytes) -> bytes:

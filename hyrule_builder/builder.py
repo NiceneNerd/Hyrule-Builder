@@ -1,11 +1,10 @@
-# pylint: disable=invalid-name,bare-except
-""" Functions for building BOTW mods """
+# pylint: disable=invalid-name,bare-except,missing-docstring
+import json
+import shutil
 from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
-import json
 from multiprocessing import Pool, cpu_count
-import shutil
 from zlib import crc32
 
 import aamp
@@ -13,13 +12,13 @@ from aamp import yaml_util as ay
 import byml
 from byml import yaml_util as by
 import pymsyt
-from rstb import SizeCalculator, ResourceSizeTable
-from rstb.util import write_rstb
 import sarc
-from xxhash import xxh64_hexdigest
 import yaml
-from . import (AAMP_EXTS, BYML_EXTS, SARC_EXTS, EXEC_DIR, guess, decompress, compress,
-               get_canon_name, Path, is_in_sarc)
+from rstb import ResourceSizeTable, SizeCalculator
+from rstb.util import write_rstb
+
+from . import (AAMP_EXTS, BYML_EXTS, EXEC_DIR, SARC_EXTS, Path, compress,
+               get_canon_name, guess, is_in_sarc)
 from .files import STOCK_FILES
 
 RSTB_EXCLUDE_EXTS = ['.pack', '.bgdata', '.txt', '.bgsvdata', '.yml', '.json', '.ps1', '.bak',
@@ -128,7 +127,7 @@ def _build_yml(f: Path, params: BuildParams):
                     t.suffix.replace('.s', ''), data, params.guess, params.be
                 )
             }
-    except Exception as e:
+    except Exception as e: # pylint: disable=broad-except
         print(f'Failed to build {f.relative_to(params.mod).as_posix()}: {e}')
         return {}
     if params.verbose:
@@ -138,7 +137,7 @@ def _build_yml(f: Path, params: BuildParams):
 def _build_sarc(d: Path, params: BuildParams):
     rvs = {}
     for f in {
-        f for f in (params.mod / d.relative_to(params.out)).rglob('**/*') if f.is_file()
+            f for f in (params.mod / d.relative_to(params.out)).rglob('**/*') if f.is_file()
     }:
         if f.modified_date() > params.ch_date:
             modified = True
@@ -181,6 +180,33 @@ def _build_sarc(d: Path, params: BuildParams):
             print(f'Built {d.relative_to(params.out).as_posix()}')
         return rvs
 
+def _build_actorinfo(params: BuildParams):
+    loader = yaml.CSafeLoader
+    by.add_constructors(loader)
+    actor_info = {
+        'Actors': [],
+        'Hashes': []
+    }
+    for actor in (params.mod / params.content / 'Actor' / 'ActorInfo').glob('*.info.yml'):
+        actor_info['Actors'].append(yaml.load(
+            actor.read_text(encoding='utf-8'),
+            Loader=loader
+        ))
+    actor_info['Hashes'] = [
+        byml.Int(crc) if crc < 2147483648 else byml.UInt(crc) for crc in sorted(
+            {crc32(actor['name'].encode('utf8')) for actor in actor_info['Actors']}
+        )
+    ]
+    actor_info['Actors'].sort(
+        key=lambda actor: crc32(actor['name'].encode('utf8'))
+    )
+    (params.out / params.content / 'Actor' / 'ActorInfo.product.sbyml').write_bytes(
+        compress(
+            byml.Writer(actor_info, be=params.be).get_bytes()
+        )
+    )
+
+
 def build_mod(args):
     content = 'content' if args.be else 'atmosphere/titles/01007EF00011E000/romfs'
     aoc = 'aoc' if args.be else 'atmosphere/titles/01007EF00011F001/romfs'
@@ -201,7 +227,7 @@ def build_mod(args):
                          ch_date=ch_date)
 
     print('Scanning source files...')
-    files = {f for f in mod.rglob('**/*') if f.is_file()}
+    files = {f for f in mod.rglob('**/*') if f.is_file() and 'ActorInfo' not in f.parts}
     other_files = {f for f in files if f.suffix not in {'.yml', '.msyt'}}
     yml_files = {f for f in files if f.suffix == '.yml'}
     f: Path
@@ -219,7 +245,11 @@ def build_mod(args):
         for r in results:
             rvs.update(r)
 
-    if (mod / 'content').exists():
+    if (mod / content).exists():
+        print('Building actor info...')
+        if (mod / content / 'Actor' / 'ActorInfo').is_dir():
+            _build_actorinfo(params)
+
         msg_dirs = {d for d in mod.glob(f'{content}/Pack/Bootup_*.pack') \
                     if d.is_dir() and not d.name == 'Bootup_Graphics.pack'}
         if msg_dirs:
