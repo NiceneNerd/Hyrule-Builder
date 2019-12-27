@@ -11,10 +11,11 @@ import byml
 from byml import yaml_util as by
 import pymsyt
 import sarc
+from syaz0 import decompress
 import yaml
 from rstb.util import read_rstb
 
-from . import (AAMP_EXTS, BYML_EXTS, SARC_EXTS, decompress, get_canon_name)
+from . import AAMP_EXTS, BYML_EXTS, SARC_EXTS, get_canon_name
 from .files import STOCK_FILES
 
 HANDLED = {'ResourceSizeTable.product.srsizetable', 'ActorInfo.product.sbyml'}

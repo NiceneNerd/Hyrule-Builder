@@ -6,7 +6,7 @@ with open("README.md", "r") as readme:
 
 setup(
     name='hyrule_builder',
-    version='0.2.8',
+    version='0.2.9',
     author='NiceneNerd',
     author_email='macadamiadaze@gmail.com',
     description='A mod builder/unbuilder for The Legend of Zelda: Breath of the Wild',
@@ -32,8 +32,8 @@ setup(
         'pymsyt>=0.1.3',
         'pyyaml>=5.1.2',
         'sarc>=2.0.1',
+        'syaz0>=1.0.0rc4',
         'rstb>=1.1.2',
-        'wszst-yaz0>=1.2.0.post1',
         'xxhash>=1.3.0'
     ]
 )

@@ -13,12 +13,12 @@ import byml
 from byml import yaml_util as by
 import pymsyt
 import sarc
+from syaz0 import compress
 import yaml
 from rstb import ResourceSizeTable, SizeCalculator
 from rstb.util import write_rstb
 
-from . import (AAMP_EXTS, BYML_EXTS, EXEC_DIR, SARC_EXTS, Path, compress,
-               get_canon_name, guess, is_in_sarc)
+from . import AAMP_EXTS, BYML_EXTS, EXEC_DIR, SARC_EXTS, Path, get_canon_name, guess, is_in_sarc
 from .files import STOCK_FILES
 
 RSTB_EXCLUDE_EXTS = ['.pack', '.bgdata', '.txt', '.bgsvdata', '.yml', '.json', '.ps1', '.bak',
@@ -200,7 +200,9 @@ def _build_actorinfo(params: BuildParams):
     actor_info['Actors'].sort(
         key=lambda actor: crc32(actor['name'].encode('utf8'))
     )
-    (params.out / params.content / 'Actor' / 'ActorInfo.product.sbyml').write_bytes(
+    info_path = params.out / params.content / 'Actor' / 'ActorInfo.product.sbyml'
+    info_path.parent.mkdir(exist_ok=True, parents=True)
+    info_path.write_bytes(
         compress(
             byml.Writer(actor_info, be=params.be).get_bytes()
         )

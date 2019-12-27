@@ -62,18 +62,3 @@ def get_canon_name(file: Path, allow_no_source: bool = False) -> str:
 def modified_date(self) -> datetime:
     return datetime.fromtimestamp(self.stat().st_mtime)
 setattr(Path, 'modified_date', modified_date)
-
-try:
-    # pylint: disable=no-member
-    import libyaz0.yaz0_cy
-    decompress = libyaz0.yaz0_cy.DecompressYaz
-    def compress(data: bytes) -> bytes:
-        compressed_data = libyaz0.yaz0_cy.CompressYaz(bytes(data), 10)
-        result = bytearray(b'Yaz0')
-        result += len(data).to_bytes(4, "big")
-        result += (0).to_bytes(4, "big")
-        result += b'\0\0\0\0'
-        result += compressed_data
-        return result
-except (ImportError, NameError):
-    from wszst_yaz0 import decompress, compress
