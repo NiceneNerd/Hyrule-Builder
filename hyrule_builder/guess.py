@@ -1,19 +1,21 @@
 # pylint: disable=missing-docstring
 from pathlib import Path
 from typing import Union
-import wszst_yaz0
+import syaz0
+
 
 def guess_bfres_size(file: Union[Path, bytes], name: str = '') -> int:
     real_bytes = file if isinstance(file, bytes) else file.read_bytes()
     if real_bytes[0:4] == b'Yaz0':
-        real_bytes = wszst_yaz0.decompress(real_bytes)
+        real_bytes = syaz0.decompress(real_bytes)
     real_size = int(len(real_bytes) * 1.1)
     del real_bytes
     if name == '':
         if isinstance(file, Path):
             name = file.name
         else:
-            raise ValueError('BFRES name must not be blank if passing file as bytes.')
+            raise ValueError(
+                'BFRES name must not be blank if passing file as bytes.')
     if '.Tex' in name:
         if real_size < 100:
             return real_size * 9
@@ -74,14 +76,15 @@ def guess_bfres_size(file: Union[Path, bytes], name: str = '') -> int:
 def guess_aamp_size(file: Union[Path, bytes], ext: str = '') -> int:
     real_bytes = file if isinstance(file, bytes) else file.read_bytes()
     if real_bytes[0:4] == b'Yaz0':
-        real_bytes = wszst_yaz0.decompress(real_bytes)
+        real_bytes = syaz0.decompress(real_bytes)
     real_size = int(len(real_bytes) * 1.1)
     del real_bytes
     if ext == '':
         if isinstance(file, Path):
             ext = file.suffix
         else:
-            raise ValueError('AAMP extension must not be blank if passing file as bytes.')
+            raise ValueError(
+                'AAMP extension must not be blank if passing file as bytes.')
     ext = ext.replace('.s', '.')
     if ext == '.baiprog':
         if real_size <= 380:
@@ -152,6 +155,7 @@ def guess_aamp_size(file: Union[Path, bytes], ext: str = '') -> int:
             return real_size * 5
         return int(real_size * 4.05)
     if ext == '.bas':
+        real_size = int(real_size * 1.05)
         if real_size < 100:
             return real_size * 20
         if 100 < real_size <= 200:
@@ -168,6 +172,7 @@ def guess_aamp_size(file: Union[Path, bytes], ext: str = '') -> int:
             return real_size * 5
         return int(real_size * 4.5)
     if ext == '.baslist':
+        real_size = int(real_size * 1.05)
         if real_size < 100:
             return real_size * 15
         if 100 < real_size <= 200:

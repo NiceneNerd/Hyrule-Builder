@@ -3,11 +3,12 @@ import textwrap as _textwrap
 import re
 from . import unbuilder, builder
 
+
 def main() -> None:
     """ Main Hyrule Builder function """
     parser = argparse.ArgumentParser(description='Builds and unbuilds BOTW mods for Wii U')
+    parser.add_argument('-V', '--version', action='store_true')
     subparsers = parser.add_subparsers(dest='command', help='Command')
-    subparsers.required = True
 
     b_parser = subparsers.add_parser(
         'build',
@@ -44,7 +45,15 @@ atmosphere
         sub.add_argument('--verbose', '-V', help='Provide more detailed output', action='store_true')
 
     args = parser.parse_args()
-    args.func(args)
+    if hasattr(args, 'func'):
+        args.func(args)
+    else:
+        if args.version:
+            from .__version__ import USER_VERSION
+            print(f'Hyrule Builder: version {USER_VERSION}')
+        else:
+            parser.print_help()
+
 
 class PreserveWhiteSpaceWrapRawTextHelpFormatter(argparse.RawDescriptionHelpFormatter):
     def __add_whitespace(self, idx, iWSpace, text):
@@ -54,16 +63,17 @@ class PreserveWhiteSpaceWrapRawTextHelpFormatter(argparse.RawDescriptionHelpForm
 
     def _split_lines(self, text, width):
         textRows = text.splitlines()
-        for idx,line in enumerate(textRows):
-            search = re.search('\s*[0-9\-]{0,}\.?\s*', line)
+        for idx, line in enumerate(textRows):
+            search = re.search(r'\s*[0-9\-]{0,}\.?\s*', line)
             if line.strip() is "":
                 textRows[idx] = " "
             elif search:
                 lWSpace = search.end()
-                lines = [self.__add_whitespace(i,lWSpace,x) for i,x in enumerate(_textwrap.wrap(line, width))]
+                lines = [self.__add_whitespace(i, lWSpace, x) for i, x in enumerate(_textwrap.wrap(line, width))]
                 textRows[idx] = lines
 
         return [item for sublist in textRows for item in sublist]
+
 
 if __name__ == "__main__":
     main()
