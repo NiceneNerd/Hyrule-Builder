@@ -1,20 +1,18 @@
 # pylint: disable=invalid-name,bare-except,missing-docstring,no-name-in-module
 from datetime import datetime
-from multiprocessing import Pool, cpu_count
+from multiprocessing import Pool, cpu_count, set_start_method
 from pathlib import Path
 from shutil import rmtree
 from typing import Union
 from zlib import crc32
 
-import aamp.converters as ac
-import byml
+import oead
+from oead import aamp
 import pymsyt
 import sarc
-import yaml
-from byml import yaml_util as by
+from syaz0 import decompress
 from rstb import ResourceSizeTable
 from rstb.util import read_rstb
-from syaz0 import decompress
 
 from . import AAMP_EXTS, BYML_EXTS, SARC_EXTS, get_canon_name
 from .files import STOCK_FILES
@@ -38,7 +36,7 @@ def _unbuild_file(f: Path, out: Path, content: str, mod: Path, verbose: bool) ->
         pass
     elif f.suffix in AAMP_EXTS:
         of.with_suffix(f'{f.suffix}.yml').write_bytes(
-            ac.aamp_to_yml(f.read_bytes()))
+            _aamp_to_yml(f.read_bytes()))
     elif f.suffix in BYML_EXTS:
         of.with_suffix(f'{f.suffix}.yml').write_bytes(
             _byml_to_yml(f.read_bytes()))
@@ -98,17 +96,14 @@ def _unbuild_rstb(content: Path, be: bool, out: Path, mod: Path, names: set):
 
 
 def _unbuild_actorinfo(mod: Path, content: str, out: Path):
-    if not hasattr(_byml_to_yml, 'dumper'):
-        _byml_to_yml.dumper = yaml.CDumper
-        by.add_representers(_byml_to_yml.dumper)
     file = mod / content / 'Actor' / 'ActorInfo.product.sbyml'
-    actor_info = byml.Byml(decompress(file.read_bytes())).parse()
-    for actor in actor_info['Actors']:
-        output = out / content / 'Actor' / \
-            'ActorInfo' / f"{actor['name']}.info.yml"
+    actor_info = oead.Byml.from_binary(decompress(file.read_bytes()))
+    for actor in actor_info.v['Actors'].v:
+        output = out / content / 'Actor' / 'ActorInfo' / f"{actor.v['name'].v}.info.yml"
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(
-            yaml.dump(actor, allow_unicode=True, Dumper=_byml_to_yml.dumper)
+            actor.to_text(),
+            encoding='utf-8'
         )
 
 
@@ -126,7 +121,7 @@ def _unbuild_actorpack(s: sarc.SARC, output: Path):
         data = s.get_file_data(f).tobytes()
         if data[0:4] == b'AAMP':
             out.write_bytes(
-                ac.aamp_to_yml(data)
+                _aamp_to_yml(data)
             )
         elif data[0:2] in [b'BY', b'YB']:
             out.write_bytes(
@@ -139,6 +134,7 @@ def _unbuild_actorpack(s: sarc.SARC, output: Path):
             s.get_file_data(f).tobytes()
         )
     return names
+
 
 def _unbuild_sarc(s: sarc.SARC, output: Path):
     SKIP_SARCS = {
@@ -176,7 +172,7 @@ def _unbuild_sarc(s: sarc.SARC, output: Path):
             if osf.with_suffix(f'{osf.suffix}.yml').exists():
                 continue
             osf.with_suffix(f'{osf.suffix}.yml').write_bytes(
-                ac.aamp_to_yml(s.get_file_data(sf).tobytes())
+                _aamp_to_yml(s.get_file_data(sf).tobytes())
             )
         elif ext in BYML_EXTS:
             osf.with_suffix(f'{osf.suffix}.yml').write_bytes(
@@ -195,16 +191,15 @@ def _unbuild_sarc(s: sarc.SARC, output: Path):
 
 
 def _byml_to_yml(file_bytes: bytes) -> bytes:
-    if not hasattr(_byml_to_yml, 'dumper'):
-        _byml_to_yml.dumper = yaml.CDumper
-        by.add_representers(_byml_to_yml.dumper)
-    return yaml.dump(
-        byml.Byml(_if_unyaz(file_bytes)).parse(),
-        Dumper=_byml_to_yml.dumper,
-        allow_unicode=True,
-        encoding='utf-8',
-        default_flow_style=False
-    )
+    if file_bytes[0:4] == b'Yaz0':
+        file_bytes = decompress(file_bytes)
+    return oead.Byml.from_binary(file_bytes).to_text().encode('utf8')
+
+
+def _aamp_to_yml(file_bytes: bytes) -> bytes:
+    if file_bytes[0:4] == b'Yaz0':
+        file_bytes = decompress(file_bytes)
+    return aamp.ParameterIO.from_binary(file_bytes).to_text().encode('utf8')
 
 
 def unbuild_mod(args) -> None:
@@ -236,6 +231,7 @@ def unbuild_mod(args) -> None:
             )
     else:
         from functools import partial
+        set_start_method('spawn', True)
         p = Pool(processes=t)
         result = p.map(partial(_unbuild_file, mod=mod, content=content,
                                out=out, verbose=args.verbose), files)
@@ -244,7 +240,6 @@ def unbuild_mod(args) -> None:
         for r in result:
             if r:
                 names.update(r)
-
 
     print('Unpacking actor info...')
     if (mod / content / 'Actor' / 'ActorInfo.product.sbyml').exists():

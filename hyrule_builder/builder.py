@@ -4,17 +4,14 @@ import shutil
 from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
-from multiprocessing import Pool, cpu_count
+from multiprocessing import Pool, cpu_count, set_start_method
 from zlib import crc32
 
-import aamp
-from aamp import yaml_util as ay
-import byml
-from byml import yaml_util as by
+import oead
+import oead.aamp
 import pymsyt
 import sarc
-from syaz0 import compress  # pylint: diable=no-name-in-module
-import yaml
+from syaz0 import compress
 from rstb import ResourceSizeTable, SizeCalculator
 from rstb.util import write_rstb
 
@@ -90,27 +87,12 @@ def _copy_file(f: Path, params: BuildParams):
     return {}
 
 
-def _build_byml(f: Path, be: bool):
-    # pylint: disable=no-member
-    if not hasattr(_build_byml, 'loader'):
-        setattr(_build_byml, 'loader', yaml.CSafeLoader)
-        by.add_constructors(_build_byml.loader)
-
-    with f.open('r', encoding='utf-8') as bf:
-        data = yaml.load(bf, Loader=_build_byml.loader)
-    file_bytes = byml.Writer(data, be, version=2).get_bytes()
-    return file_bytes
+def _build_byml(f: Path, be: bool) -> bytes:
+    return bytes(oead.Byml.from_text(f.read_text('utf-8')).to_binary(big_endian=be))
 
 
-def _build_aamp(f: Path):
-    if not hasattr(_build_aamp, 'loader'):
-        _build_aamp.loader = yaml.CLoader
-        ay.register_constructors(_build_aamp.loader)
-
-    with f.open('r', encoding='utf-8') as af:
-        data = yaml.load(af, Loader=_build_aamp.loader)
-    file_bytes = aamp.Writer(data).get_bytes()
-    return file_bytes
+def _build_aamp(f: Path) -> bytes:
+    return bytes(oead.aamp.ParameterIO.from_text(f.read_text('utf-8')).to_binary())
 
 
 def _build_yml(f: Path, params: BuildParams):
@@ -139,6 +121,7 @@ def _build_yml(f: Path, params: BuildParams):
     if params.verbose:
         print(f'Built {f.relative_to(params.mod).as_posix()}')
     return rv
+
 
 LINK_MAP = {
     3293308145: 'AIProgram/*.baiprog',
@@ -183,68 +166,77 @@ TITLE_ACTORS = [
     'ThunderRodLv2Thunder', 'ThunderRodLv2ThunderChild', 'WakeBoardRope'
 ]
 
+
 def _build_actor(link: Path, params: BuildParams):
     pack = sarc.SARCWriter(be=params.be)
     actor_name = link.stem
-    actor = aamp.Reader(link.read_bytes()).parse()
+    actor = oead.aamp.ParameterIO.from_binary(link.read_bytes())
     actor_path = params.out / params.content / 'Actor'
-    targets = actor.list('param_root').object('LinkTarget')
+    targets = actor.objects['LinkTarget']
     modified = False
     try:
         files = {}
         for p, name in targets.params.items():
+            name = name.v
             if name == 'Dummy':
                 continue
             if p in LINK_MAP:
                 path = LINK_MAP[p].replace('*', name)
                 files['Actor/' + path] = actor_path / path
-            elif p == 110127898: # ASUser
+            elif p == 110127898:  # ASUser
                 list_path = actor_path / 'ASList' / f'{name}.baslist'
                 aslist_bytes = list_path.read_bytes()
                 files[f'Actor/ASList/{name}.baslist'] = list_path
-                aslist = aamp.Reader(aslist_bytes).parse()
-                for anim in aslist.list('param_root').list('ASDefines').objects.values():
-                    filename = anim.param("Filename")
+                aslist = oead.aamp.ParameterIO.from_binary(aslist_bytes)
+                for _, anim in aslist.lists['ASDefines'].objects.items():
+                    filename = anim.params["Filename"].v
                     if filename != 'Dummy':
                         files[f'Actor/AS/{filename}.bas'] = actor_path / 'AS' / f'{filename}.bas'
-            elif p == 1086735552: # AttentionUser
+            elif p == 1086735552:  # AttentionUser
                 list_path = actor_path / 'AttClientList' / f'{name}.batcllist'
                 atcllist_bytes = list_path.read_bytes()
                 files[f'Actor/AttClientList/{name}.batcllist'] = list_path
-                atcllist = aamp.Reader(atcllist_bytes).parse()
-                for atcl in atcllist.list('param_root').list('AttClients').objects.values():
-                    filename = atcl.param('FileName')
+                atcllist = oead.aamp.ParameterIO.from_binary(atcllist_bytes)
+                for _, atcl in atcllist.lists['AttClients'].objects.items():
+                    filename = atcl.params['FileName'].v
                     if filename != 'Dummy':
                         files[f'Actor/AttClient/{filename}.batcl'] = actor_path / 'AttClient' / f'{filename}.batcl'
-            elif p == 4022948047: # RgConfigListUser
+            elif p == 4022948047:  # RgConfigListUser
                 list_path = actor_path / 'RagdollConfigList' / f'{name}.brgconfiglist'
                 rgconfiglist_bytes = list_path.read_bytes()
                 files[f'Actor/RagdollConfigList/{name}.brgconfiglist'] = list_path
-                rgconfiglist = aamp.Reader(rgconfiglist_bytes).parse()
-                for impl in rgconfiglist.list('param_root').list('ImpulseParamList').objects.values():
-                    filename = impl.param('FileName')
+                rgconfiglist = oead.aamp.ParameterIO.from_binary(rgconfiglist_bytes)
+                for _, impl in rgconfiglist.lists['ImpulseParamList'].objects.items():
+                    filename = impl.params['FileName'].v
                     if filename != 'Dummy':
-                        files[f'Actor/RagdollConfig/{filename}.brgconfig'] = actor_path / 'RagdollConfig' / f'{filename}.brgconfig'
-            elif p == 2366604039: # PhysicsUser
+                        files[f'Actor/RagdollConfig/{filename}.brgconfig'] = actor_path / \
+                            'RagdollConfig' / f'{filename}.brgconfig'
+            elif p == 2366604039:  # PhysicsUser
                 phys_source = params.out / params.content / 'Physics'
                 phys_path = actor_path / 'Physics' / f'{name}.bphysics'
                 phys_bytes = phys_path.read_bytes()
                 files[f'Actor/Physics/{name}.bphysics'] = phys_path
-                phys = aamp.Reader(phys_bytes).parse()
-                types: aamp.ParameterObject = phys.list('param_root').list('ParamSet').objects[1258832850]
-                if types.param('use_ragdoll'):
-                    rg_path = phys.list('param_root').list('ParamSet').object('Ragdoll').param('ragdoll_setup_file_path')
+                phys = oead.aamp.ParameterIO.from_binary(phys_bytes)
+                types = phys.lists['ParamSet'].objects[1258832850]
+                if types.params['use_ragdoll'].v:
+                    rg_path = str(phys.lists['ParamSet'].objects['Ragdoll'].params[
+                        'ragdoll_setup_file_path'
+                    ].v)
                     files[f'Physics/Ragdoll/{rg_path}'] = phys_source / 'Ragdoll' / rg_path
-                if types.param('use_support_bone'):
-                    sb_path = phys.list('param_root').list('ParamSet').object('SupportBone').param('support_bone_setup_file_path')
+                if types.params['use_support_bone'].v:
+                    sb_path = str(phys.lists['ParamSet'].objects['SupportBone'].params[
+                        'support_bone_setup_file_path'
+                    ].v)
                     files[f'Physics/SupportBone/{sb_path}'] = phys_source / 'SupportBone' / sb_path
-                if types.param('use_cloth'):
-                    cloth_path = phys.list('param_root').list('ParamSet').list('Cloth').object('ClothHeader').param('cloth_setup_file_path')
+                if types.params['use_cloth'].v:
+                    cloth_path = str(phys.lists['ParamSet'].lists['Cloth'].objects[
+                        'ClothHeader'
+                    ].params['cloth_setup_file_path'].v)
                     files[f'Physics/Cloth/{cloth_path}'] = phys_source / 'Cloth' / cloth_path
-                if types.param('use_rigid_body_set_num') > 0:
-                    for rigid in phys.list('param_root').list('ParamSet').list('RigidBodySet').lists.values():
+                if types.params['use_rigid_body_set_num'].v > 0:
+                    for _, rigid in phys.lists['ParamSet'].lists['RigidBodySet'].lists.items():
                         try:
-                            rigid_path = rigid.objects[4288596824].param('setup_file_path')
+                            rigid_path = str(rigid.objects[4288596824].params['setup_file_path'].v)
                             if (phys_path / 'RigidBody' / rigid_path).exists():
                                 files[f'Physics/RigidBody/{rigid_path}'] = phys_path / 'RigidBody' / rigid_path
                         except KeyError:
@@ -274,7 +266,7 @@ def _build_actor(link: Path, params: BuildParams):
             )
         }
     return {}
-    
+
 
 def _build_sarc(d: Path, params: BuildParams):
     rvs = {}
@@ -324,30 +316,28 @@ def _build_sarc(d: Path, params: BuildParams):
 
 
 def _build_actorinfo(params: BuildParams):
-    loader = yaml.CSafeLoader
-    by.add_constructors(loader)
-    actor_info = {
-        'Actors': [],
-        'Hashes': []
-    }
+    actors = []
     for actor in (params.mod / params.content / 'Actor' / 'ActorInfo').glob('*.info.yml'):
-        actor_info['Actors'].append(yaml.load(
-            actor.read_text(encoding='utf-8'),
-            Loader=loader
+        actors.append(oead.Byml.from_text(
+            actor.read_text(encoding='utf-8')
         ))
-    actor_info['Hashes'] = [
-        byml.Int(crc) if crc < 2147483648 else byml.UInt(crc) for crc in sorted(
-            {crc32(actor['name'].encode('utf8')) for actor in actor_info['Actors']}
+    hashes = oead.Byml.Array([
+        oead.S32(crc) if crc < 2147483648 else oead.U32(crc) for crc in sorted(
+            {crc32(a.v['name'].v.encode('utf8')) for a in actors}
         )
-    ]
-    actor_info['Actors'].sort(
-        key=lambda actor: crc32(actor['name'].encode('utf8'))
+    ])
+    actors.sort(
+        key=lambda actor: crc32(actor.v['name'].v.encode('utf8'))
     )
+    actor_info = oead.Byml.Hash({
+        'Actors': oead.Byml.Array(actors),
+        'Hashes': hashes
+    })
     info_path = params.out / params.content / 'Actor' / 'ActorInfo.product.sbyml'
     info_path.parent.mkdir(exist_ok=True, parents=True)
     info_path.write_bytes(
         compress(
-            byml.Writer(actor_info, be=params.be).get_bytes()
+            oead.Byml(actor_info).to_binary(big_endian=params.be)
         )
     )
 
@@ -383,6 +373,7 @@ def build_mod(args):
         for f in other_files:
             rvs.update(_copy_file(f, params))
     else:
+        set_start_method('spawn', True)
         p = Pool(cpu_count())
         results = p.map(partial(_copy_file, params=params), other_files)
         for r in results:
@@ -428,7 +419,6 @@ def build_mod(args):
         if d.stem not in ['StaticCompound', 'TeraMeshRigidBody']:
             shutil.rmtree(d)
     {shutil.rmtree(d) for d in (out / content / 'Actor').glob('*') if d.is_dir() and d.stem != 'Pack'}
-        
 
     print('Building SARC files...')
     dirs = {d for d in out.rglob('**/*') if d.is_dir()}
