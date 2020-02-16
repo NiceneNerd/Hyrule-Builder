@@ -97,12 +97,12 @@ def _unbuild_rstb(content: Path, be: bool, out: Path, mod: Path, names: set):
 
 def _unbuild_actorinfo(mod: Path, content: str, out: Path):
     file = mod / content / 'Actor' / 'ActorInfo.product.sbyml'
-    actor_info = oead.Byml.from_binary(decompress(file.read_bytes()))
-    for actor in actor_info.v['Actors'].v:
-        output = out / content / 'Actor' / 'ActorInfo' / f"{actor.v['name'].v}.info.yml"
+    actor_info = oead.byml.from_binary(decompress(file.read_bytes()))
+    for actor in actor_info['Actors']:
+        output = out / content / 'Actor' / 'ActorInfo' / f"{actor['name']}.info.yml"
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(
-            actor.to_text(),
+            oead.byml.to_text(actor),
             encoding='utf-8'
         )
 
@@ -193,7 +193,7 @@ def _unbuild_sarc(s: sarc.SARC, output: Path):
 def _byml_to_yml(file_bytes: bytes) -> bytes:
     if file_bytes[0:4] == b'Yaz0':
         file_bytes = decompress(file_bytes)
-    return oead.Byml.from_binary(file_bytes).to_text().encode('utf8')
+    return oead.byml.to_text(oead.byml.from_binary(file_bytes)).encode('utf8')
 
 
 def _aamp_to_yml(file_bytes: bytes) -> bytes:

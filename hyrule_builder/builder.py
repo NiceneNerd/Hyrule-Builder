@@ -88,7 +88,12 @@ def _copy_file(f: Path, params: BuildParams):
 
 
 def _build_byml(f: Path, be: bool) -> bytes:
-    return bytes(oead.Byml.from_text(f.read_text('utf-8')).to_binary(big_endian=be))
+    return bytes(
+        oead.byml.to_binary(
+            oead.byml.from_text(f.read_text('utf-8')),
+            big_endian=be
+        )
+    )
 
 
 def _build_aamp(f: Path) -> bytes:
@@ -318,26 +323,26 @@ def _build_sarc(d: Path, params: BuildParams):
 def _build_actorinfo(params: BuildParams):
     actors = []
     for actor in (params.mod / params.content / 'Actor' / 'ActorInfo').glob('*.info.yml'):
-        actors.append(oead.Byml.from_text(
+        actors.append(oead.byml.from_text(
             actor.read_text(encoding='utf-8')
         ))
-    hashes = oead.Byml.Array([
+    hashes = oead.byml.Array([
         oead.S32(crc) if crc < 2147483648 else oead.U32(crc) for crc in sorted(
-            {crc32(a.v['name'].v.encode('utf8')) for a in actors}
+            {crc32(a['name'].encode('utf8')) for a in actors}
         )
     ])
     actors.sort(
-        key=lambda actor: crc32(actor.v['name'].v.encode('utf8'))
+        key=lambda actor: crc32(actor['name'].encode('utf8'))
     )
-    actor_info = oead.Byml.Hash({
-        'Actors': oead.Byml.Array(actors),
+    actor_info = oead.byml.Hash({
+        'Actors': oead.byml.Array(actors),
         'Hashes': hashes
     })
     info_path = params.out / params.content / 'Actor' / 'ActorInfo.product.sbyml'
     info_path.parent.mkdir(exist_ok=True, parents=True)
     info_path.write_bytes(
         compress(
-            oead.Byml(actor_info).to_binary(big_endian=params.be)
+            oead.byml.to_binary(actor_info, big_endian=params.be)
         )
     )
 

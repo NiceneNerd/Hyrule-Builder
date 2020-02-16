@@ -31,7 +31,7 @@ setup(
     ],
     python_requires='>=3.7',
     install_requires=[
-        'oead>=0.9.3',
+        'oead>=0.10.0',
         'pymsyt>=0.1.3',
         'sarc>=2.0.3',
         'syaz0>=1.0.1',
