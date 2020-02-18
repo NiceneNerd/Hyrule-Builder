@@ -64,7 +64,7 @@ class PreserveWhiteSpaceWrapRawTextHelpFormatter(argparse.RawDescriptionHelpForm
     def _split_lines(self, text, width):
         textRows = text.splitlines()
         for idx, line in enumerate(textRows):
-            search = re.search(r'\s*[0-9\-]{0,}\.?\s*', line)
+            search = re.search(r'\s*[0-9\-]*\.?\s*', line)
             if line.strip() is "":
                 textRows[idx] = " "
             elif search:

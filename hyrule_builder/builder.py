@@ -72,7 +72,7 @@ def _get_rstb_val(ext: str, data: bytes, should_guess: bool, be: bool) -> int:
 
 
 def _copy_file(f: Path, params: BuildParams):
-    t = params.out / f.relative_to(params.mod)
+    t: Path = params.out / f.relative_to(params.mod)
     if not t.parent.exists():
         t.parent.mkdir(parents=True, exist_ok=True)
     if is_in_sarc(f):
@@ -98,7 +98,11 @@ def _build_byml(f: Path, be: bool) -> bytes:
 
 
 def _build_aamp(f: Path) -> bytes:
-    return bytes(oead.aamp.ParameterIO.from_text(f.read_text('utf-8')).to_binary())
+    return bytes(
+        oead.aamp.ParameterIO.from_text(
+            f.read_text('utf-8')
+        ).to_binary()
+    )
 
 
 def _build_yml(f: Path, params: BuildParams):
@@ -171,7 +175,9 @@ def _build_actor(link: Path, params: BuildParams):
         endian=oead.Endianness.Big if params.be else oead.Endianness.Little
     )
     actor_name = link.stem
-    actor = oead.aamp.ParameterIO.from_binary(link.read_bytes())
+    actor = oead.aamp.ParameterIO.from_binary(
+        link.read_bytes()
+    )
     actor_path = params.out / params.content / 'Actor'
     targets = actor.objects['LinkTarget']
     modified = False
@@ -296,12 +302,11 @@ def _build_sarc(d: Path, params: BuildParams):
         f: Path
         for f in {f for f in d.rglob('**/*') if f.is_file()}:
             path = f.relative_to(d).as_posix()
-            data = f.read_bytes()
-            s.add_file(lead + path, data)
+            s.files[lead + path] = f.read_bytes()
             f.unlink()
 
         shutil.rmtree(d)
-        sb = s.get_bytes()
+        sb = s.write()
         if modified and _should_rstb(d):
             rvs.update({
                 get_canon_name(d.relative_to(params.out)): _get_rstb_val(
@@ -321,9 +326,9 @@ def _build_sarc(d: Path, params: BuildParams):
 
 def _build_actorinfo(params: BuildParams):
     actors = []
-    for actor in (params.mod / params.content / 'Actor' / 'ActorInfo').glob('*.info.yml'):
+    for actor_file in (params.mod / params.content / 'Actor' / 'ActorInfo').glob('*.info.yml'):
         actors.append(oead.byml.from_text(
-            actor.read_text(encoding='utf-8')
+            actor_file.read_text(encoding='utf-8')
         ))
     hashes = oead.byml.Array([
         oead.S32(crc) if crc < 2147483648 else oead.U32(crc) for crc in sorted(
