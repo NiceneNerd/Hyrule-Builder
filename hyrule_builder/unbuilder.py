@@ -8,9 +8,9 @@ from zlib import crc32
 
 import oead
 from oead import aamp
+from oead.yaz0 import decompress
 import pymsyt
-import sarc
-from syaz0 import decompress
+# import sarc
 from rstb import ResourceSizeTable
 from rstb.util import read_rstb
 
@@ -42,9 +42,13 @@ def _unbuild_file(f: Path, out: Path, content: str, mod: Path, verbose: bool) ->
             _byml_to_yml(f.read_bytes()))
     elif f.suffix in SARC_EXTS:
         with f.open('rb') as file:
-            s = sarc.read_file_and_make_sarc(file)
-        if not s:
-            return
+            # s = sarc.read_file_and_make_sarc(file)
+            data = file.read()
+            if data[0:4] == b'Yaz0':
+                data = decompress(data)
+            if data[0:4] != b'SARC':
+                return names
+            s = oead.Sarc(data)
         if 'bactorpack' in f.suffix:
             names.update(
                 _unbuild_actorpack(
@@ -107,46 +111,43 @@ def _unbuild_actorinfo(mod: Path, content: str, out: Path):
         )
 
 
-def _unbuild_actorpack(s: sarc.SARC, output: Path):
+def _unbuild_actorpack(s: oead.Sarc, output: Path):
     output.mkdir(parents=True, exist_ok=True)
-    actor_name = next(Path(f).stem for f in s.list_files() if 'ActorLink' in f)
-    names = set(s.list_files())
-    params = [f for f in s.list_files() if 'Actor' in f]
-    havoks = {
-        f for f in s.list_files() if 'Physics' in f and 'Actor' not in f
-    }
-    for f in params:
-        out = (output / f).with_suffix(f'{Path(f).suffix}.yml')
+    # actor_name = next(Path(f.name).stem for f in s.get_files() if 'ActorLink' in f)
+    for f in {f for f in s.get_files() if 'Actor' in f.name}:
+        out = (output / f.name).with_suffix(f'{Path(f.name).suffix}.yml')
         out.parent.mkdir(parents=True, exist_ok=True)
-        data = s.get_file_data(f).tobytes()
-        if data[0:4] == b'AAMP':
+        if f.data[0:4] == b'AAMP':
             out.write_bytes(
-                _aamp_to_yml(data)
+                _aamp_to_yml(f.data)
             )
-        elif data[0:2] in [b'BY', b'YB']:
+        elif f.data[0:2] in [b'BY', b'YB']:
             out.write_bytes(
-                _byml_to_yml(data)
+                _byml_to_yml(f.data)
             )
-    for f in havoks:
-        out = output / f
+    for f in {
+        f for f in s.get_files() if 'Physics' in f.name and 'Actor' not in f.name
+    }:
+        out = output / f.name
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_bytes(
-            s.get_file_data(f).tobytes()
+            f.data
         )
-    return names
+    return {f.name for f in s.get_files()}
 
 
-def _unbuild_sarc(s: sarc.SARC, output: Path):
+def _unbuild_sarc(s: oead.Sarc, output: Path):
     SKIP_SARCS = {
         'tera_resource.Cafe_Cafe_GX2.release.ssarc', 'tera_resource.Nin_NX_NVN.release.ssarc'
     }
 
     output.mkdir(parents=True, exist_ok=True)
-    if any(f.startswith('/') for f in s.list_files()):
+    if any(f.name.startswith('/') for f in s.get_files()):
         (output / '.slash').write_bytes(b'')
 
     names = set()
-    for sf in s.list_files():
+    for sarc_file in s.get_files():
+        sf = sarc_file.name
         osf = output / sf
         names.add(sf.replace('.s', '.'))
         if sf.startswith('/'):
@@ -155,10 +156,10 @@ def _unbuild_sarc(s: sarc.SARC, output: Path):
         ext = osf.suffix
         if ext in SARC_EXTS:
             if osf.name in SKIP_SARCS:
-                osf.write_bytes(s.get_file_data(sf).tobytes())
+                osf.write_bytes(sarc_file.data)
                 continue
             try:
-                ss = sarc.SARC(_if_unyaz(s.get_file_data(sf).tobytes()))
+                ss = oead.Sarc(_if_unyaz(sarc_file.data))
                 if 'bactorpack' in ext and output.stem == 'TitleBG':
                     names.update(
                         _unbuild_actorpack(ss, output.parent.parent)
@@ -172,21 +173,21 @@ def _unbuild_sarc(s: sarc.SARC, output: Path):
             if osf.with_suffix(f'{osf.suffix}.yml').exists():
                 continue
             osf.with_suffix(f'{osf.suffix}.yml').write_bytes(
-                _aamp_to_yml(s.get_file_data(sf).tobytes())
+                _aamp_to_yml(sarc_file.data)
             )
         elif ext in BYML_EXTS:
             osf.with_suffix(f'{osf.suffix}.yml').write_bytes(
-                _byml_to_yml(s.get_file_data(sf).tobytes())
+                _byml_to_yml(sarc_file.data)
             )
         else:
-            osf.write_bytes(s.get_file_data(sf).tobytes())
+            osf.write_bytes(sarc_file.data)
 
     if 'Msg_' in output.name:
         pymsyt.export(output, output)
         rmtree(output)
         output.with_suffix('').rename(output)
     if output.suffix in {'.ssarc', '.sarc'}:
-        (output / '.align').write_text(str(s.guess_default_alignment()))
+        (output / '.align').write_text(str(s.guess_min_alignment()))
     return names
 
 

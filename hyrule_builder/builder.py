@@ -9,18 +9,19 @@ from zlib import crc32
 
 import oead
 import oead.aamp
+from oead.yaz0 import compress
 import pymsyt
-import sarc
-from syaz0 import compress
+# import sarc
+# from syaz0 import compress
 from rstb import ResourceSizeTable, SizeCalculator
 from rstb.util import write_rstb
 
 from . import AAMP_EXTS, BYML_EXTS, EXEC_DIR, SARC_EXTS, Path, get_canon_name, guess, is_in_sarc
 from .files import STOCK_FILES
 
-RSTB_EXCLUDE_EXTS = ['.pack', '.bgdata', '.txt', '.bgsvdata', '.yml', '.json', '.ps1', '.bak',
-                     '.bat', '.ini', '.png', '.bfstm', '.py', '.sh', '.old', '.stera']
-RSTB_EXCLUDE_NAMES = ['ActorInfo.product.byml', '.done']
+RSTB_EXCLUDE_EXTS = {'.pack', '.bgdata', '.txt', '.bgsvdata', '.yml', '.json', '.ps1', '.bak',
+                     '.bat', '.ini', '.png', '.bfstm', '.py', '.sh', '.old', '.stera'}
+RSTB_EXCLUDE_NAMES = {'ActorInfo.product.byml', '.done'}
 
 
 @dataclass
@@ -131,8 +132,6 @@ def _build_yml(f: Path, params: BuildParams):
 LINK_MAP = {
     3293308145: 'AIProgram/*.baiprog',
     2851261459: 'AISchedule/*.baischedule',
-    # 110127898: 'AS/*.bas', 'ASList/*.baslist',
-    # 1086735552: 'AttClient/*.batcl', 'AttClientList/*.batcllist',
     1767976113: 'Awareness/*.bawareness',
     713857735: 'BoneControl/*.bbonectrl',
     2863165669: 'Chemical/*.bchemical',
@@ -142,18 +141,13 @@ LINK_MAP = {
     414149463: 'LifeCondition/*.blifecondition',
     1096753192: 'LOD/*.blod',
     3086518481: 'ModelList/*.bmodellist',
-    # 2366604039: 'Physics/*.bphysics',
-    # 1223968357: 'ProfileUser',
     1292038778: 'RagdollBlendWeight/*.brgbw',
-    # 4022948047: 'RagdollConfig/*.brgconfig', 'RagdollConfigList/*.brgconfiglist',
     1589643025: 'Recipe/*.brecipe',
     2994379201: 'ShopData/*.bshop',
-    # 3829750722: 'SlinkUser',
     3926186935: 'UMii/*.bumii',
-    # 1712375071: 'XlinkUser'
 }
 
-TITLE_ACTORS = [
+TITLE_ACTORS = {
     'AncientArrow', 'Animal_Insect_A', 'Animal_Insect_B', 'Animal_Insect_F',
     'Animal_Insect_H', 'Animal_Insect_M', 'Animal_Insect_S', 'Animal_Insect_X',
     'Armor_Default_Extra_00', 'Armor_Default_Extra_01', 'BombArrow_A',
@@ -169,11 +163,13 @@ TITLE_ACTORS = [
     'RemoteBomb', 'RemoteBomb2', 'RemoteBombCube', 'RemoteBombCube2', 'SceneSoundCtrlTag',
     'SoundTriggerTag', 'TerrainCalcCenterTag', 'ThunderRodLv1Thunder',
     'ThunderRodLv2Thunder', 'ThunderRodLv2ThunderChild', 'WakeBoardRope'
-]
+}
 
 
 def _build_actor(link: Path, params: BuildParams):
-    pack = sarc.SARCWriter(be=params.be)
+    pack = oead.SarcWriter(
+        endian=oead.Endianness.Big if params.be else oead.Endianness.Little
+    )
     actor_name = link.stem
     actor = oead.aamp.ParameterIO.from_binary(link.read_bytes())
     actor_path = params.out / params.content / 'Actor'
@@ -249,11 +245,11 @@ def _build_actor(link: Path, params: BuildParams):
         for name, path in files.items():
             if not modified and path.modified_date() > params.ch_date:
                 modified = True
-            pack.add_file(name, path.read_bytes())
+            pack.files[name] = path.read_bytes()
     except FileNotFoundError as e:
         print(f'Failed to build actor "{actor_name}": Could not find linked file "{e.filename}".')
         return {}
-    sb = pack.get_bytes()
+    sb = pack.write()
     dest: Path
     if actor_name in TITLE_ACTORS:
         dest = params.out / params.content / 'Pack' / 'TitleBG.pack' / 'Actor' / 'Pack' / f'{actor_name}.sbactorpack'
@@ -284,11 +280,14 @@ def _build_sarc(d: Path, params: BuildParams):
     else:
         modified = False
     try:
-        s = sarc.SARCWriter(params.be)
+        s = oead.SarcWriter(
+            endian=oead.Endianness.Big if params.be else oead.Endianness.Little
+        )
         lead = ''
         if (d / '.align').exists():
             alignment = int((d / '.align').read_text())
-            s.set_default_alignment(alignment)
+            s.set_mode(oead.SarcWriter.Mode.Legacy)
+            s.set_min_alignment(alignment)
             (d / '.align').unlink()
         if (d / '.slash').exists():
             lead = '/'
