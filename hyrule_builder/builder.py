@@ -187,8 +187,8 @@ def _build_actor(link: Path, params: BuildParams):
             name = name.v
             if name == 'Dummy':
                 continue
-            if p in LINK_MAP:
-                path = LINK_MAP[p].replace('*', name)
+            if p.hash in LINK_MAP:
+                path = LINK_MAP[p.hash].replace('*', name)
                 files['Actor/' + path] = actor_path / path
             elif p == 110127898:  # ASUser
                 list_path = actor_path / 'ASList' / f'{name}.baslist'
