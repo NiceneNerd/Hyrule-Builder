@@ -7,12 +7,11 @@ from functools import partial
 from multiprocessing import Pool, cpu_count, set_start_method
 from zlib import crc32
 
+from botw.hashes import StockHashTable
 import oead
 import oead.aamp
 from oead.yaz0 import compress
 import pymsyt
-# import sarc
-# from syaz0 import compress
 from rstb import ResourceSizeTable, SizeCalculator
 from rstb.util import write_rstb
 
@@ -33,7 +32,7 @@ class BuildParams:
     be: bool
     guess: bool
     verbose: bool
-    ch_date: datetime
+    table: StockHashTable
 
 
 def _should_rstb(f: Path) -> bool:
@@ -81,10 +80,10 @@ def _copy_file(f: Path, params: BuildParams):
         data = f.read_bytes()
         canon = get_canon_name(f.relative_to(params.mod))
         t.write_bytes(data)
-    if f.modified_date() > params.ch_date and _should_rstb(f):
-        return {
-            canon: _get_rstb_val(t.suffix, data, params.guess, params.be)
-        }
+        if params.table.is_file_modded(canon, data) and _should_rstb(f):
+            return {
+                canon: _get_rstb_val(t.suffix, data, params.guess, params.be)
+            }
     return {}
 
 
@@ -118,8 +117,8 @@ def _build_yml(f: Path, params: BuildParams):
         elif ext in AAMP_EXTS:
             data = _build_aamp(f)
         t.write_bytes(data if not t.suffix.startswith('.s') else compress(data))
-        if f.modified_date() > params.ch_date and _should_rstb(t):
-            canon = get_canon_name(t.relative_to(params.out))
+        canon = get_canon_name(t.relative_to(params.out))
+        if params.table.is_file_modded(canon, data) and _should_rstb(t):
             return {
                 canon: _get_rstb_val(
                     t.suffix.replace('.s', ''), data, params.guess, params.be
@@ -182,7 +181,9 @@ def _build_actor(link: Path, params: BuildParams):
     targets = actor.objects['LinkTarget']
     modified = False
     try:
-        files = {}
+        files = {
+            f'Actor/ActorLink/{actor_name}.bxml': link
+        }
         for p, name in targets.params.items():
             name = name.v
             if name == 'Dummy':
@@ -249,13 +250,16 @@ def _build_actor(link: Path, params: BuildParams):
                         except KeyError:
                             continue
         for name, path in files.items():
-            if not modified and path.modified_date() > params.ch_date:
+            data = path.read_bytes()
+            pack.files[name] = data
+            if not modified and params.table.is_file_modded(
+                name.replace('.s', ''), memoryview(data), True
+            ):
                 modified = True
-            pack.files[name] = path.read_bytes()
     except FileNotFoundError as e:
         print(f'Failed to build actor "{actor_name}": Could not find linked file "{e.filename}".')
         return {}
-    sb = pack.write()
+    _, sb = pack.write()
     dest: Path
     if actor_name in TITLE_ACTORS:
         dest = params.out / params.content / 'Pack' / 'TitleBG.pack' / 'Actor' / 'Pack' / f'{actor_name}.sbactorpack'
@@ -280,7 +284,8 @@ def _build_sarc(d: Path, params: BuildParams):
     for f in {
             f for f in (params.mod / d.relative_to(params.out)).rglob('**/*') if f.is_file()
     }:
-        if f.modified_date() > params.ch_date:
+        canon = get_canon_name(f.relative_to(params.mod), True)
+        if params.table.is_file_modded(canon, f.read_bytes()):
             modified = True
             break
     else:
@@ -306,7 +311,7 @@ def _build_sarc(d: Path, params: BuildParams):
             f.unlink()
 
         shutil.rmtree(d)
-        sb = s.write()
+        _, sb = s.write()
         if modified and _should_rstb(d):
             rvs.update({
                 get_canon_name(d.relative_to(params.out)): _get_rstb_val(
@@ -363,12 +368,9 @@ def build_mod(args):
         print('Removing old build...')
         shutil.rmtree(out)
 
-    ch_date = datetime.fromtimestamp(float(
-        (mod / '.done').read_text()
-    ))
     params = BuildParams(mod=mod, out=out, be=args.be, guess=not args.no_guess,
                          verbose=args.verbose, content=content, aoc=aoc,
-                         ch_date=ch_date)
+                         table=StockHashTable(args.be))
 
     print('Scanning source files...')
     files = {f for f in mod.rglob('**/*') if f.is_file() and 'ActorInfo' not in f.parts}
@@ -461,6 +463,7 @@ def build_mod(args):
                 table = load_rstb(args.be)
                 rp.parent.mkdir(parents=True, exist_ok=True)
             if rvs and not (len(rvs) == 1 and list(rvs.keys())[0] is None):
+                print(len(rvs))
                 for p, v in rvs.items():
                     if not p:
                         continue

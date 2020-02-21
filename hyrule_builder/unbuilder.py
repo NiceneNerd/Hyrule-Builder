@@ -10,7 +10,6 @@ import oead
 from oead import aamp
 from oead.yaz0 import decompress
 import pymsyt
-# import sarc
 from rstb import ResourceSizeTable
 from rstb.util import read_rstb
 
@@ -42,7 +41,6 @@ def _unbuild_file(f: Path, out: Path, content: str, mod: Path, verbose: bool) ->
             _byml_to_yml(f.read_bytes()))
     elif f.suffix in SARC_EXTS:
         with f.open('rb') as file:
-            # s = sarc.read_file_and_make_sarc(file)
             data = file.read()
             if data[0:4] == b'Yaz0':
                 data = decompress(data)

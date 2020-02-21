@@ -1,20 +1,21 @@
 # pylint: disable=missing-docstring
 from pathlib import Path
 from typing import Union
-import syaz0
+
+from oead import yaz0
 
 
 def guess_bfres_size(file: Union[Path, bytes], name: str = '') -> int:
     if isinstance(file, bytes):
         if file[0:4] == b'Yaz0':
-            real_size = syaz0.get_header(memoryview(file[0:16])).uncompressed_size
+            real_size = yaz0.get_header(memoryview(file[0:16])).uncompressed_size
         else:
             real_size = len(file)
         del file
     else:
         if file.suffix.startswith('.s'):
             with file.open('rb') as f:
-                real_size = syaz0.get_header(f.read(16)).uncompressed_size
+                real_size = yaz0.get_header(f.read(16)).uncompressed_size
         else:
             real_size = file.stat().st_size
     if name == '':
@@ -95,7 +96,7 @@ def guess_aamp_size(file: Union[Path, bytes], ext: str = '') -> int:
     else:
         if file.suffix.startswith('.s'):
             with file.open('rb') as f:
-                real_size = syaz0.get_header(f.read(16)).uncompressed_size
+                real_size = yaz0.get_header(f.read(16)).uncompressed_size
         else:
             real_size = file.stat().st_size
     real_size = int(real_size * 1.05)

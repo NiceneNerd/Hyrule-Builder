@@ -42,16 +42,28 @@ def get_canon_name(file: Path, allow_no_source: bool = False) -> str:
         ]))
         file = file.relative_to(parent)
         allow_no_source = True
-    name = file.as_posix()\
-        .replace("\\", "/")\
-        .replace('atmosphere/titles/01007EF00011E000/romfs', 'content')\
-        .replace('atmosphere/titles/01007EF00011E001/romfs', 'aoc/0010')\
-        .replace('atmosphere/titles/01007EF00011E002/romfs', 'aoc/0010')\
-        .replace('atmosphere/titles/01007EF00011F001/romfs', 'aoc/0010')\
-        .replace('atmosphere/titles/01007EF00011F002/romfs', 'aoc/0010')\
-        .replace('.s', '.')\
-        .replace('Content', 'content')\
-        .replace('Aoc', 'aoc')
+    name = (file.as_posix()
+                .replace("\\", "/")
+                .replace('atmosphere/titles/', '')
+                .replace('atmosphere/contents/', '')
+                .replace('01007EF00011E000/romfs', 'content')
+                .replace('01007ef00011e000/romfs', 'content')
+                .replace('01007EF00011e000/romfs', 'content')
+                .replace('01007EF00011E001/romfs', 'aoc/0010')
+                .replace('01007EF00011e001/romfs', 'aoc/0010')
+                .replace('01007ef00011e001/romfs', 'aoc/0010')
+                .replace('01007EF00011E002/romfs', 'aoc/0010')
+                .replace('01007EF00011e002/romfs', 'aoc/0010')
+                .replace('01007ef00011E002/romfs', 'aoc/0010')
+                .replace('01007EF00011F001/romfs', 'aoc/0010')
+                .replace('01007EF00011f001/romfs', 'aoc/0010')
+                .replace('01007ef00011F001/romfs', 'aoc/0010')
+                .replace('01007EF00011F002/romfs', 'aoc/0010')
+                .replace('01007EF00011f002/romfs', 'aoc/0010')
+                .replace('01007ef00011f002/romfs', 'aoc/0010')
+                .replace('.s', '.')
+                .replace('Content', 'content')
+                .replace('Aoc', 'aoc'))
     if 'aoc/' in name:
         return name.replace('aoc/content', 'aoc').replace('aoc', 'Aoc')
     elif 'content/' in name and '/aoc' not in name:

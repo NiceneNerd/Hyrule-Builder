@@ -31,10 +31,9 @@ setup(
     ],
     python_requires='>=3.7',
     install_requires=[
+        'botw-utils>=0.1.0',
         'oead>=0.10.0',
         'pymsyt>=0.1.4',
-        'sarc>=2.0.3',
-        'syaz0>=1.0.1',
         'rstb>=1.1.3',
         'xxhash>=1.3.0'
     ]
