@@ -33,7 +33,7 @@ def main() -> None:
 The main mod folder. For Wii U, this must contain a `content` folder and/or an `aoc` folder \
 (the latter for DLC files). For Switch, you must use the following layout:
 atmosphere
-└─ titles
+└─ contents
    ├─ 01007EF00011E000 (for base game files)
    │  └─ romfs
    └─ 01007EF00011F001 (for DLC files)
