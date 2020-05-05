@@ -357,8 +357,8 @@ def _build_actorinfo(params: BuildParams):
 
 
 def build_mod(args):
-    content = 'content' if args.be else 'atmosphere/titles/01007EF00011E000/romfs'
-    aoc = 'aoc' if args.be else 'atmosphere/titles/01007EF00011F001/romfs'
+    content = 'content' if args.be else 'atmosphere/contents/01007EF00011E000/romfs'
+    aoc = 'aoc' if args.be else 'atmosphere/contents/01007EF00011F001/romfs'
     mod = Path(args.directory)
     if not ((mod / content).exists() or (mod / aoc).exists()):
         print('The specified directory is not valid: no content or aoc folder found')

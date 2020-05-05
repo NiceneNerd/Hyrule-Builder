@@ -205,8 +205,8 @@ def unbuild_mod(args) -> None:
     mod = Path(args.directory)
     if not any(d.exists() for d in {
             mod / 'content', mod / 'aoc',
-            mod / 'atmosphere/titles/01007EF00011E000/romfs',
-            mod / 'atmosphere/titles/01007EF00011F001/romfs'
+            mod / 'atmosphere/contents/01007EF00011E000/romfs',
+            mod / 'atmosphere/contents/01007EF00011F001/romfs'
     }):
         print('The specified directory is not valid: no base game or DLC folder found')
         exit(1)
@@ -215,7 +215,7 @@ def unbuild_mod(args) -> None:
         from shutil import rmtree
         rmtree(out, True)
     be = (mod / 'content').exists() or (mod / 'aoc').exists()
-    content = 'content' if be else 'atmosphere/titles/01007EF00011E000/romfs'
+    content = 'content' if be else 'atmosphere/contents/01007EF00011E000/romfs'
 
     print('Analying files...')
     files = {f for f in mod.rglob('**/*') if f.is_file()}
