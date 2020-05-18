@@ -5,25 +5,25 @@ from typing import Union
 from oead import yaz0
 
 
-def guess_bfres_size(file: Union[Path, bytes], name: str = '') -> int:
+def guess_bfres_size(file: Union[Path, bytes], name: str = "") -> int:
     if isinstance(file, bytes):
-        if file[0:4] == b'Yaz0':
+        if file[0:4] == b"Yaz0":
             real_size = yaz0.get_header(memoryview(file[0:16])).uncompressed_size
         else:
             real_size = len(file)
         del file
     else:
-        if file.suffix.startswith('.s'):
-            with file.open('rb') as f:
+        if file.suffix.startswith(".s"):
+            with file.open("rb") as f:
                 real_size = yaz0.get_header(f.read(16)).uncompressed_size
         else:
             real_size = file.stat().st_size
-    if name == '':
+    if name == "":
         if isinstance(file, Path):
             name = file.name
         else:
-            raise ValueError('BFRES name must not be blank if passing file as bytes.')
-    if '.Tex' in name:
+            raise ValueError("BFRES name must not be blank if passing file as bytes.")
+    if ".Tex" in name:
         if real_size < 100:
             return real_size * 10
         elif 100 < real_size <= 1500:
@@ -89,24 +89,26 @@ def guess_bfres_size(file: Union[Path, bytes], name: str = '') -> int:
             return int(real_size * 1.45)
 
 
-def guess_aamp_size(file: Union[Path, bytes], ext: str = '') -> int:
+def guess_aamp_size(file: Union[Path, bytes], ext: str = "") -> int:
     if isinstance(file, bytes):
         real_size = len(file)
         del file
     else:
-        if file.suffix.startswith('.s'):
-            with file.open('rb') as f:
+        if file.suffix.startswith(".s"):
+            with file.open("rb") as f:
                 real_size = yaz0.get_header(f.read(16)).uncompressed_size
         else:
             real_size = file.stat().st_size
     real_size = int(real_size * 1.05)
-    if ext == '':
+    if ext == "":
         if isinstance(file, Path):
             ext = file.suffix
         else:
-            raise ValueError('AAMP extension must not be blank if passing file as bytes.')
-    ext = ext.replace('.s', '.')
-    if ext == '.baiprog':
+            raise ValueError(
+                "AAMP extension must not be blank if passing file as bytes."
+            )
+    ext = ext.replace(".s", ".")
+    if ext == ".baiprog":
         if real_size <= 380:
             return real_size * 7
         elif 380 < real_size <= 400:
@@ -121,7 +123,7 @@ def guess_aamp_size(file: Union[Path, bytes], ext: str = '') -> int:
             return int(real_size * 3.5)
         else:
             return real_size * 3
-    elif ext == '.bgparamlist':
+    elif ext == ".bgparamlist":
         if real_size <= 100:
             return real_size * 20
         elif 100 < real_size <= 150:
@@ -134,7 +136,7 @@ def guess_aamp_size(file: Union[Path, bytes], ext: str = '') -> int:
             return real_size * 7
         else:
             return real_size * 6
-    elif ext == '.bdrop':
+    elif ext == ".bdrop":
         if real_size < 150:
             return max(1024, int(real_size * 10))
         elif 150 < real_size <= 200:
@@ -151,7 +153,7 @@ def guess_aamp_size(file: Union[Path, bytes], ext: str = '') -> int:
             return int(real_size * 5.25)
         else:
             return int(real_size * 4.667)
-    elif ext == '.bxml':
+    elif ext == ".bxml":
         if real_size < 350:
             return real_size * 7
         elif 350 < real_size <= 450:
@@ -164,7 +166,7 @@ def guess_aamp_size(file: Union[Path, bytes], ext: str = '') -> int:
             return int(real_size * 3.5)
         else:
             return real_size * 3
-    elif ext == '.brecipe':
+    elif ext == ".brecipe":
         if real_size < 100:
             return int(real_size * 12.5)
         elif 100 < real_size <= 160:
@@ -175,7 +177,7 @@ def guess_aamp_size(file: Union[Path, bytes], ext: str = '') -> int:
             return real_size * 7
         else:
             return int(real_size * 6.5)
-    elif ext == '.bshop':
+    elif ext == ".bshop":
         if real_size < 150:
             return max(1024, int(real_size * 10))
         elif 150 < real_size <= 200:
@@ -186,7 +188,7 @@ def guess_aamp_size(file: Union[Path, bytes], ext: str = '') -> int:
             return int(real_size * 6)
         else:
             return int(real_size * 5)
-    elif ext == '.bas':
+    elif ext == ".bas":
         # real_size = int(1.05 * real_size)
         if real_size < 100:
             return real_size * 20
@@ -204,7 +206,7 @@ def guess_aamp_size(file: Union[Path, bytes], ext: str = '') -> int:
             return int(real_size * 5.5)
         else:
             return int(real_size * 5)
-    elif ext == '.baslist':
+    elif ext == ".baslist":
         real_size = int(1.05 * real_size)
         if real_size < 100:
             return real_size * 15
@@ -220,7 +222,7 @@ def guess_aamp_size(file: Union[Path, bytes], ext: str = '') -> int:
             return real_size * 4
         else:
             return int(real_size * 3.5)
-    elif ext == '.bdmgparam':
+    elif ext == ".bdmgparam":
         return int(((-0.0018 * real_size) + 6.6273) * real_size) + 500
     else:
         return 0
