@@ -91,9 +91,9 @@ def _get_rstb_val(ext: str, data: bytes, should_guess: bool, be: bool) -> int:
     )  # pylint: disable=no-member
     if val == 0 and should_guess:
         if ext in AAMP_EXTS:
-            val = guess.guess_aamp_size(data, ext)
+            val = guess.guess_aamp_size(data, be, ext)
         elif ext in {".bfres", ".sbfres"}:
-            val = guess.guess_bfres_size(data, ext)
+            val = guess.guess_bfres_size(data, be, ext)
     return val
 
 
