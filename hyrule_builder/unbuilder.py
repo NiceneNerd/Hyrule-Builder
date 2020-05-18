@@ -1,6 +1,7 @@
 # pylint: disable=invalid-name,bare-except,missing-docstring,no-name-in-module
 from datetime import datetime
-from multiprocessing import Pool, cpu_count, set_start_method
+from functools import partial
+from multiprocessing import Pool, cpu_count
 from pathlib import Path
 from shutil import rmtree
 from typing import Union
@@ -82,21 +83,21 @@ def rstb_to_json(rstb: ResourceSizeTable, output: Path, names: set):
 def _unbuild_rstb(content: Path, be: bool, out: Path, mod: Path, names: set):
     f: Path = content / "System" / "Resource" / "ResourceSizeTable.product.srsizetable"
     table = read_rstb(str(f), be=be)
-    rstb_to_json(table, out / f.relative_to(mod), names)
+    rstb_to_json(table, out / f.relative_to(mod).with_suffix(".json"), names)
 
 
 def _unbuild_actorinfo(mod: Path, content: str, out: Path):
     file = mod / content / "Actor" / "ActorInfo.product.sbyml"
     actor_info = oead.byml.from_binary(decompress(file.read_bytes()))
+    actor_info_dir = out / content / "Actor" / "ActorInfo"
+    actor_info_dir.mkdir(parents=True, exist_ok=True)
     for actor in actor_info["Actors"]:
-        output = out / content / "Actor" / "ActorInfo" / f"{actor['name']}.info.yml"
-        output.parent.mkdir(parents=True, exist_ok=True)
+        output = actor_info_dir / f"{actor['name']}.info.yml"
         output.write_text(oead.byml.to_text(actor), encoding="utf-8")
 
 
 def _unbuild_actorpack(s: oead.Sarc, output: Path):
     output.mkdir(parents=True, exist_ok=True)
-    # actor_name = next(Path(f.name).stem for f in s.get_files() if 'ActorLink' in f)
     for f in {f for f in s.get_files() if "Actor" in f.name}:
         out = (output / f.name).with_suffix(f"{Path(f.name).suffix}.yml")
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -186,8 +187,8 @@ def unbuild_mod(args) -> None:
         for d in {
             mod / "content",
             mod / "aoc",
-            mod / "atmosphere/contents/01007EF00011E000/romfs",
-            mod / "atmosphere/contents/01007EF00011F001/romfs",
+            mod / "01007EF00011E000/romfs",
+            mod / "01007EF00011F001/romfs",
         }
     ):
         print("The specified directory is not valid: no base game or DLC folder found")
@@ -198,7 +199,7 @@ def unbuild_mod(args) -> None:
 
         rmtree(out, True)
     be = (mod / "content").exists() or (mod / "aoc").exists()
-    content = "content" if be else "atmosphere/contents/01007EF00011E000/romfs"
+    content = "content" if be else "01007EF00011E000/romfs"
 
     print("Analying files...")
     files = {f for f in mod.rglob("**/*") if f.is_file()}
@@ -210,21 +211,20 @@ def unbuild_mod(args) -> None:
         for f in files:
             names.update(_unbuild_file(f, out, content, mod, args.verbose))
     else:
-        from functools import partial
-
-        set_start_method("spawn", True)
-        p = Pool(processes=t)
-        result = p.map(
-            partial(
-                _unbuild_file, mod=mod, content=content, out=out, verbose=args.verbose
-            ),
-            files,
-        )
-        p.close()
-        p.join()
-        for r in result:
-            if r:
-                names.update(r)
+        with Pool(processes=t) as p:
+            result = p.map(
+                partial(
+                    _unbuild_file,
+                    mod=mod,
+                    content=content,
+                    out=out,
+                    verbose=args.verbose,
+                ),
+                files,
+            )
+            for r in result:
+                if r:
+                    names.update(r)
 
     print("Unpacking actor info...")
     if (mod / content / "Actor" / "ActorInfo.product.sbyml").exists():

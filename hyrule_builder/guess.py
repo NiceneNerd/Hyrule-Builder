@@ -18,7 +18,7 @@ def guess_bfres_size(file: Union[Path, bytes], be: bool, name: str = "") -> int:
                 real_size = yaz0.get_header(f.read(16)).uncompressed_size
         else:
             real_size = file.stat().st_size
-    real_size = int(len(real_size) * 1.05)
+    real_size = int(real_size * 1.05)
     if name == "":
         if isinstance(file, Path):
             name = file.name

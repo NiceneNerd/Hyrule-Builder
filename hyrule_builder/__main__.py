@@ -1,11 +1,13 @@
 import argparse
 import textwrap as _textwrap
 import re
+from multiprocessing import set_start_method
 from . import unbuilder, builder
 
 
 def main() -> None:
     """ Main Hyrule Builder function """
+    set_start_method("spawn", True)
     parser = argparse.ArgumentParser(
         description="Builds and unbuilds BOTW mods for Wii U"
     )
@@ -26,6 +28,13 @@ def main() -> None:
     b_parser.add_argument(
         "--no-guess", "-G", help="Do not use RSTB estimates", action="store_true"
     )
+    b_parser.add_argument(
+        "--title-actors",
+        "-T",
+        help="Comma separated list of custom actors to add to TitleBG.pack, "
+        "e.g.\n`--title-actors=Weapon_Bow_001,Enemy_Golem_Senior`",
+        default="",
+    )
     b_parser.add_argument("--output", "-O", help="Output folder for built mod")
     b_parser.set_defaults(func=builder.build_mod)
 
@@ -40,8 +49,7 @@ def main() -> None:
     dir_help = """\
 The main mod folder. For Wii U, this must contain a `content` folder and/or an `aoc` folder \
 (the latter for DLC files). For Switch, you must use the following layout:
-atmosphere
-└─ contents
+   .
    ├─ 01007EF00011E000 (for base game files)
    │  └─ romfs
    └─ 01007EF00011F001 (for DLC files)

@@ -57,6 +57,7 @@ class BuildParams:
     be: bool
     guess: bool
     verbose: bool
+    titles: set
     table: StockHashTable
 
 
@@ -347,7 +348,7 @@ def _build_actor(link: Path, params: BuildParams):
         return {}
     _, sb = pack.write()
     dest: Path
-    if actor_name in TITLE_ACTORS:
+    if actor_name in (TITLE_ACTORS | params.titles):
         dest = (
             params.out
             / params.content
@@ -450,11 +451,12 @@ def _build_actorinfo(params: BuildParams):
 
 
 def build_mod(args):
-    content = "content" if args.be else "atmosphere/contents/01007EF00011E000/romfs"
-    aoc = "aoc" if args.be else "atmosphere/contents/01007EF00011F001/romfs"
+    content = "content" if args.be else "01007EF00011E000/romfs"
+    aoc = "aoc" if args.be else "01007EF00011F001/romfs"
     mod = Path(args.directory)
     if not ((mod / content).exists() or (mod / aoc).exists()):
-        print("The specified directory is not valid: no content or aoc folder found")
+        print("The specified directory is not valid: no content or DLC folder found")
+        print("Run `hyrule_builder build --help` for more information.")
         exit(1)
     out = mod.with_name(f"{mod.name}_build") if not args.output else Path(args.output)
     if out.exists():
@@ -469,6 +471,7 @@ def build_mod(args):
         verbose=args.verbose,
         content=content,
         aoc=aoc,
+        titles=set(args.title_actors.split(",")),
         table=StockHashTable(args.be),
     )
 
@@ -484,7 +487,6 @@ def build_mod(args):
         for f in other_files:
             rvs.update(_copy_file(f, params))
     else:
-        set_start_method("spawn", True)
         p = Pool(cpu_count())
         results = p.map(partial(_copy_file, params=params), other_files)
         for r in results:
@@ -554,6 +556,10 @@ def build_mod(args):
         for r in results:
             rvs.update(r)
 
+    if p:
+        p.close()
+        p.join()
+
     rp = out / content / "System" / "Resource" / "ResourceSizeTable.product.json"
     if rp.exists() or rvs:
         print("Updating RSTB...")
@@ -568,7 +574,6 @@ def build_mod(args):
                 table = load_rstb(args.be)
                 rp.parent.mkdir(parents=True, exist_ok=True)
             if rvs and not (len(rvs) == 1 and list(rvs.keys())[0] is None):
-                print(len(rvs))
                 for p, v in rvs.items():
                     if not p:
                         continue
