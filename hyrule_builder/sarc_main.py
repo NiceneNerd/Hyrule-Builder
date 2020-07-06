@@ -1,13 +1,10 @@
-# pylint: disable=bad-continuation
+# pylint: disable=bad-continuation,unsupported-assignment-operation
 import argparse
 from multiprocessing import set_start_method
 from pathlib import Path
 import oead
-from botw.hashes import StockHashTable
 from . import AAMP_EXTS, BYML_EXTS, SARC_EXTS
 from .unbuilder import _unbuild_sarc as unsarc
-from .builder import _build_sarc as resarc
-from .builder import BuildParams
 
 
 def unbuild_sarc() -> None:
