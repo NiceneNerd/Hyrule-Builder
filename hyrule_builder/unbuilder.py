@@ -1,7 +1,9 @@
-# pylint: disable=invalid-name,bare-except,missing-docstring,no-name-in-module
+# pylint: disable=invalid-name,bare-except,missing-docstring,no-name-in-module,bad-continuation
+import json
 from datetime import datetime
 from functools import partial
 from multiprocessing import Pool, cpu_count
+from os import system
 from pathlib import Path
 from shutil import rmtree
 from typing import Union
@@ -9,13 +11,12 @@ from zlib import crc32
 
 import oead
 from oead import aamp
-from oead.yaz0 import decompress
+from oead.yaz0 import decompress # pylint: disable=import-error
 import pymsyt
 from rstb import ResourceSizeTable
 from rstb.util import read_rstb
 
-from . import AAMP_EXTS, BYML_EXTS, SARC_EXTS, get_canon_name
-from .files import STOCK_FILES
+from . import AAMP_EXTS, BYML_EXTS, SARC_EXTS, STOCK_FILES, get_canon_name
 
 HANDLED = {"ResourceSizeTable.product.srsizetable", "ActorInfo.product.sbyml"}
 
@@ -59,8 +60,6 @@ def _unbuild_file(f: Path, out: Path, content: str, mod: Path, verbose: bool) ->
 
 
 def rstb_to_json(rstb: ResourceSizeTable, output: Path, names: set):
-    import json
-
     hash_map = {crc32(h.encode("utf8")): h for h in STOCK_FILES}
     hash_map.update({crc32(name.encode("utf8")): name for name in names})
 
@@ -114,7 +113,7 @@ def _unbuild_actorpack(s: oead.Sarc, output: Path):
     return {f.name for f in s.get_files()}
 
 
-def _unbuild_sarc(s: oead.Sarc, output: Path):
+def _unbuild_sarc(s: oead.Sarc, output: Path, skip_actorpack: bool = False):
     SKIP_SARCS = {
         "tera_resource.Cafe_Cafe_GX2.release.ssarc",
         "tera_resource.Nin_NX_NVN.release.ssarc",
@@ -139,7 +138,11 @@ def _unbuild_sarc(s: oead.Sarc, output: Path):
                 continue
             try:
                 ss = oead.Sarc(_if_unyaz(sarc_file.data))
-                if "bactorpack" in ext and output.stem == "TitleBG":
+                if (
+                    "bactorpack" in ext
+                    and output.stem == "TitleBG"
+                    and not skip_actorpack
+                ):
                     names.update(_unbuild_actorpack(ss, output.parent.parent))
                 else:
                     names.update(_unbuild_sarc(ss, osf))
@@ -195,8 +198,6 @@ def unbuild_mod(args) -> None:
         exit(1)
     out = mod.with_name(f"{mod.name}_unbuilt") if not args.output else Path(args.output)
     if out.exists():
-        from shutil import rmtree
-
         rmtree(out, True)
     be = (mod / "content").exists() or (mod / "aoc").exists()
     content = "content" if be else "01007EF00011E000/romfs"
@@ -238,9 +239,7 @@ def unbuild_mod(args) -> None:
 
     (out / ".done").write_text(str(datetime.now().timestamp()))
     try:
-        import os
-
-        os.system(f'attrib +h "{str(out / ".done")}"')
+        system(f'attrib +h "{str(out / ".done")}"')
     except:
         pass
 

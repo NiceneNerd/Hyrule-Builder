@@ -3,6 +3,7 @@ import textwrap as _textwrap
 import re
 from multiprocessing import set_start_method
 from . import unbuilder, builder
+from .__version__ import USER_VERSION
 
 
 def main() -> None:
@@ -69,34 +70,32 @@ The main mod folder. For Wii U, this must contain a `content` folder and/or an `
         args.func(args)
     else:
         if args.version:
-            from .__version__ import USER_VERSION
-
             print(f"Hyrule Builder: version {USER_VERSION}")
         else:
             parser.print_help()
 
 
 class PreserveWhiteSpaceWrapRawTextHelpFormatter(argparse.RawDescriptionHelpFormatter):
-    def __add_whitespace(self, idx, iWSpace, text):
-        if idx is 0:
+    def __add_whitespace(self, idx, i_whitespace, text):
+        if idx == 0:
             return text
-        return (" " * iWSpace) + text
+        return (" " * i_whitespace) + text
 
     def _split_lines(self, text, width):
-        textRows = text.splitlines()
-        for idx, line in enumerate(textRows):
+        rows = text.splitlines()
+        for idx, line in enumerate(rows):
             search = re.search(r"\s*[0-9\-]*\.?\s*", line)
             if line.strip() is "":
-                textRows[idx] = " "
+                rows[idx] = " "
             elif search:
-                lWSpace = search.end()
+                last_whitespace = search.end()
                 lines = [
-                    self.__add_whitespace(i, lWSpace, x)
+                    self.__add_whitespace(i, last_whitespace, x)
                     for i, x in enumerate(_textwrap.wrap(line, width))
                 ]
-                textRows[idx] = lines
+                rows[idx] = lines
 
-        return [item for sublist in textRows for item in sublist]
+        return [item for sublist in rows for item in sublist]
 
 
 if __name__ == "__main__":

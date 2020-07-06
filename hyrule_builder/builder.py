@@ -1,10 +1,10 @@
-# pylint: disable=invalid-name,bare-except,missing-docstring
+# pylint: disable=invalid-name,bare-except,missing-docstring,bad-continuation,import-error
+# pylint: disable=unsupported-assignment-operation
 import json
 import shutil
 from dataclasses import dataclass
-from datetime import datetime
 from functools import partial
-from multiprocessing import Pool, cpu_count, set_start_method
+from multiprocessing import Pool, cpu_count
 from zlib import crc32
 
 from botw.hashes import StockHashTable
@@ -20,12 +20,12 @@ from . import (
     BYML_EXTS,
     EXEC_DIR,
     SARC_EXTS,
+    STOCK_FILES,
     Path,
     get_canon_name,
     guess,
     is_in_sarc,
 )
-from .files import STOCK_FILES
 
 RSTB_EXCLUDE_EXTS = {
     ".pack",
@@ -87,7 +87,7 @@ def load_rstb(be: bool, file: Path = None) -> ResourceSizeTable:
 def _get_rstb_val(ext: str, data: bytes, should_guess: bool, be: bool) -> int:
     if not hasattr(_get_rstb_val, "calc"):
         setattr(_get_rstb_val, "calc", SizeCalculator())
-    val = _get_rstb_val.calc.calculate_file_size_with_ext(
+    val = _get_rstb_val.calc.calculate_file_size_with_ext( # pylint: disable=no-member
         data, wiiu=be, ext=ext
     )  # pylint: disable=no-member
     if val == 0 and should_guess:
@@ -348,7 +348,7 @@ def _build_actor(link: Path, params: BuildParams):
         return {}
     _, sb = pack.write()
     dest: Path
-    if actor_name in (TITLE_ACTORS | params.titles):
+    if actor_name in TITLE_ACTORS | params.titles:
         dest = (
             params.out
             / params.content
@@ -532,7 +532,7 @@ def build_mod(args):
     for d in (out / content / "Physics").glob("*"):
         if d.stem not in ["StaticCompound", "TeraMeshRigidBody"]:
             shutil.rmtree(d)
-    {
+    { # pylint: disable=expression-not-assigned
         shutil.rmtree(d)
         for d in (out / content / "Actor").glob("*")
         if d.is_dir() and d.stem != "Pack"

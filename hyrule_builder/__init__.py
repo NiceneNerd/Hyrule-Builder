@@ -3,6 +3,11 @@ import os
 from datetime import datetime
 from pathlib import Path
 
+from botw.hashes import StockHashTable
+
+STOCK_FILES = set(StockHashTable(True).list_stock_files()) | set(
+    StockHashTable(False).list_stock_files()
+)
 SARC_EXTS = {
     ".sarc",
     ".pack",
@@ -142,6 +147,7 @@ AAMP_EXTS = {
     ".sbvege",
     ".bactcapt",
     ".sbactcapt",
+    ".bwinfo",
 }
 BYML_EXTS = {
     ".bgdata",

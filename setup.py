@@ -1,6 +1,6 @@
 # pylint: disable=missing-docstring
-from hyrule_builder.__version__ import VERSION
 from setuptools import setup
+from hyrule_builder.__version__ import VERSION
 
 with open("README.md", "r") as readme:
     LONG = readme.read()
@@ -22,6 +22,8 @@ setup(
             'hyrule_builder = hyrule_builder.__main__:main',
             'rstb_to_json = hyrule_builder.rstb_main:rstb_to_json',
             'json_to_rstb = hyrule_builder.rstb_main:json_to_rstb',
+            'unbuild_sarc = hyrule_builder.sarc_main:unbuild_sarc',
+            'build_sarc = hyrule_builder.sarc_main:build_sarc'
         ]
     },
     classifiers=[

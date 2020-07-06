@@ -1,9 +1,10 @@
-_major = 0
-_minor = 4
-_patch = "0"
-VERSION = f"{_major}.{_minor}.{_patch}"
-USER_VERSION = f"""{_major}.{_minor}.{_patch} {
-    'alpha' if _major < 1 else ''
+_MAJOR = 0
+_MINOR = 5
+_PATCH = "0"
+
+VERSION = f"{_MAJOR}.{_MINOR}.{_PATCH}"
+USER_VERSION = f"""{_MAJOR}.{_MINOR}.{_PATCH} {
+    'alpha' if _MAJOR < 1 else ''
 }{
-    'beta' if 'b' in _patch else ''
+    'beta' if 'b' in _PATCH else ''
 }"""
