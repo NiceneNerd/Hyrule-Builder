@@ -227,6 +227,8 @@ def unbuild_mod(args) -> None:
                 if r:
                     names.update(r)
 
+    (mod / content / "Actor" / "Pack").rmdir()
+
     print("Unpacking actor info...")
     if (mod / content / "Actor" / "ActorInfo.product.sbyml").exists():
         _unbuild_actorinfo(mod, content, out)
