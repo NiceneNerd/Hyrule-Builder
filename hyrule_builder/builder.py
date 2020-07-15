@@ -328,9 +328,9 @@ def _build_actor(link: Path, params: BuildParams):
                             rigid_path = str(
                                 rigid.objects[4288596824].params["setup_file_path"].v
                             )
-                            if (phys_path / "RigidBody" / rigid_path).exists():
+                            if (phys_source / "RigidBody" / rigid_path).exists():
                                 files[f"Physics/RigidBody/{rigid_path}"] = (
-                                    phys_path / "RigidBody" / rigid_path
+                                    phys_source / "RigidBody" / rigid_path
                                 )
                         except KeyError:
                             continue
@@ -481,13 +481,14 @@ def build_mod(args):
     yml_files = {f for f in files if f.suffix == ".yml"}
     f: Path
     rvs = {}
+    if not args.single:
+        p = Pool()
 
     print("Copying miscellaneous files...")
     if args.single or len(other_files) < 2:
         for f in other_files:
             rvs.update(_copy_file(f, params))
     else:
-        p = Pool(cpu_count())
         results = p.map(partial(_copy_file, params=params), other_files)
         for r in results:
             rvs.update(r)
