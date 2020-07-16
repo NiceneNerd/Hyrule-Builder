@@ -17,7 +17,7 @@ def main() -> None:
 
     b_parser = subparsers.add_parser(
         "build",
-        description="Builds a mod into a source-like structure for editing",
+        description="Builds a mod from a source-like structure into binary game files",
         aliases=["b"],
     )
     b_parser.add_argument(
