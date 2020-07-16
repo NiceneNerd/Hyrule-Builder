@@ -227,7 +227,10 @@ def unbuild_mod(args) -> None:
                 if r:
                     names.update(r)
 
-    (mod / content / "Actor" / "Pack").rmdir()
+    try:
+        (out / content / "Actor" / "Pack").rmdir()
+    except PermissionError:
+        pass
 
     print("Unpacking actor info...")
     if (mod / content / "Actor" / "ActorInfo.product.sbyml").exists():
