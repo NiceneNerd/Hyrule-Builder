@@ -4,7 +4,7 @@ import json
 import shutil
 from dataclasses import dataclass
 from functools import partial
-from multiprocessing import Pool, cpu_count
+from multiprocessing import Pool
 from zlib import crc32
 
 from botw.hashes import StockHashTable
@@ -59,6 +59,7 @@ class BuildParams:
     verbose: bool
     titles: set
     table: StockHashTable
+    warn: bool
 
 
 def _should_rstb(f: Path) -> bool:
@@ -87,7 +88,7 @@ def load_rstb(be: bool, file: Path = None) -> ResourceSizeTable:
 def _get_rstb_val(ext: str, data: bytes, should_guess: bool, be: bool) -> int:
     if not hasattr(_get_rstb_val, "calc"):
         setattr(_get_rstb_val, "calc", SizeCalculator())
-    val = _get_rstb_val.calc.calculate_file_size_with_ext( # pylint: disable=no-member
+    val = _get_rstb_val.calc.calculate_file_size_with_ext(  # pylint: disable=no-member
         data, wiiu=be, ext=ext
     )  # pylint: disable=no-member
     if val == 0 and should_guess:
@@ -296,9 +297,17 @@ def _build_actor(link: Path, params: BuildParams):
                         .params["ragdoll_setup_file_path"]
                         .v
                     )
-                    files[f"Physics/Ragdoll/{rg_path}"] = (
-                        phys_source / "Ragdoll" / rg_path
-                    )
+                    if (phys_source / "Ragdoll" / rg_path).exists():
+                        files[f"Physics/Ragdoll/{rg_path}"] = (
+                            phys_source / "Ragdoll" / rg_path
+                        )
+                    else:
+                        if params.warn:
+                            print(
+                                f"WARNING: Havok ragdoll file Physics/Ragdoll/{rg_path} not found "
+                                f"for actor {actor_name}. Ignore if intentionally using a file not "
+                                "in the actor pack."
+                            )
                 if types.params["use_support_bone"].v:
                     sb_path = str(
                         phys.lists["ParamSet"]
@@ -306,9 +315,17 @@ def _build_actor(link: Path, params: BuildParams):
                         .params["support_bone_setup_file_path"]
                         .v
                     )
-                    files[f"Physics/SupportBone/{sb_path}"] = (
-                        phys_source / "SupportBone" / sb_path
-                    )
+                    if (phys_source / "SupportBone" / sb_path).exists():
+                        files[f"Physics/SupportBone/{sb_path}"] = (
+                            phys_source / "SupportBone" / sb_path
+                        )
+                    else:
+                        if params.warn:
+                            print(
+                                f"WARNING: Havok support bone file Physics/SupportBone/{sb_path} "
+                                f"not found for actor {actor_name}. Ignore if intentionally using "
+                                "a file not in the actor pack."
+                            )
                 if types.params["use_cloth"].v:
                     cloth_path = str(
                         phys.lists["ParamSet"]
@@ -317,9 +334,17 @@ def _build_actor(link: Path, params: BuildParams):
                         .params["cloth_setup_file_path"]
                         .v
                     )
-                    files[f"Physics/Cloth/{cloth_path}"] = (
-                        phys_source / "Cloth" / cloth_path
-                    )
+                    if (phys_source / "Cloth" / cloth_path).exists():
+                        files[f"Physics/Cloth/{cloth_path}"] = (
+                            phys_source / "Cloth" / cloth_path
+                        )
+                    else:
+                        if params.warn:
+                            print(
+                                f"WARNING: Havok cloth file Physics/Cloth/{cloth_path} not found "
+                                f"for actor {actor_name}. Ignore if intentionally using a file not "
+                                "in the actor pack."
+                            )
                 if types.params["use_rigid_body_set_num"].v > 0:
                     for _, rigid in (
                         phys.lists["ParamSet"].lists["RigidBodySet"].lists.items()
@@ -332,6 +357,14 @@ def _build_actor(link: Path, params: BuildParams):
                                 files[f"Physics/RigidBody/{rigid_path}"] = (
                                     phys_source / "RigidBody" / rigid_path
                                 )
+                            else:
+                                if params.warn:
+                                    print(
+                                        "WARNING: Havok rigid body file "
+                                        f"Physics/RigidBody/{rigid_path} not found for actor "
+                                        f"{actor_name}. Ignore if intentionally using a file not in"
+                                        " the actor pack."
+                                    )
                         except KeyError:
                             continue
         for name, path in files.items():
@@ -473,6 +506,7 @@ def build_mod(args):
         aoc=aoc,
         titles=set(args.title_actors.split(",")),
         table=StockHashTable(args.be),
+        warn=not args.suppress_warn,
     )
 
     print("Scanning source files...")
@@ -533,7 +567,7 @@ def build_mod(args):
     for d in (out / content / "Physics").glob("*"):
         if d.stem not in ["StaticCompound", "TeraMeshRigidBody"]:
             shutil.rmtree(d)
-    { # pylint: disable=expression-not-assigned
+    {  # pylint: disable=expression-not-assigned
         shutil.rmtree(d)
         for d in (out / content / "Actor").glob("*")
         if d.is_dir() and d.stem != "Pack"

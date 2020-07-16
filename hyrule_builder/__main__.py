@@ -30,6 +30,12 @@ def main() -> None:
         "--no-guess", "-G", help="Do not use RSTB estimates", action="store_true"
     )
     b_parser.add_argument(
+        "--suppress-warn",
+        "-W",
+        help="Ignore warnings, only output success/error",
+        action="store_true",
+    )
+    b_parser.add_argument(
         "--title-actors",
         "-T",
         help="Comma separated list of custom actors to add to TitleBG.pack, "
@@ -85,7 +91,7 @@ class PreserveWhiteSpaceWrapRawTextHelpFormatter(argparse.RawDescriptionHelpForm
         rows = text.splitlines()
         for idx, line in enumerate(rows):
             search = re.search(r"\s*[0-9\-]*\.?\s*", line)
-            if line.strip() is "":
+            if line.strip() == "":
                 rows[idx] = " "
             elif search:
                 last_whitespace = search.end()
