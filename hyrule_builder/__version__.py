@@ -1,6 +1,6 @@
 _MAJOR = 0
 _MINOR = 5
-_PATCH = "3"
+_PATCH = "4"
 
 VERSION = f"{_MAJOR}.{_MINOR}.{_PATCH}"
 USER_VERSION = f"""{_MAJOR}.{_MINOR}.{_PATCH} {

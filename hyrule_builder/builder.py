@@ -511,7 +511,11 @@ def build_mod(args):
     )
 
     print("Scanning source files...")
-    files = {f for f in mod.rglob("**/*") if f.is_file() and "ActorInfo" not in f.parts}
+    files = {
+        f
+        for f in mod.rglob("**/*")
+        if f.is_file() and "ActorInfo" not in f.parts and not f.parts[0].startswith(".")
+    }
     other_files = {f for f in files if f.suffix not in {".yml", ".msyt"}}
     yml_files = {f for f in files if f.suffix == ".yml"}
     f: Path
