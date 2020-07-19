@@ -33,7 +33,7 @@ setup(
     ],
     python_requires='>=3.7',
     install_requires=[
-        'botw-utils>=0.1.0',
+        'botw-utils>=0.2.2',
         'oead>=0.11.2',
         'pymsyt>=0.1.4',
         'rstb>=1.1.3',

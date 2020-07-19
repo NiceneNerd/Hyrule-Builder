@@ -8,6 +8,7 @@ from multiprocessing import Pool
 from zlib import crc32
 
 from botw.hashes import StockHashTable
+from botw.rstb import guess_aamp_size, guess_bfres_size
 import oead
 import oead.aamp
 from oead.yaz0 import compress
@@ -23,7 +24,6 @@ from . import (
     STOCK_FILES,
     Path,
     get_canon_name,
-    guess,
     is_in_sarc,
 )
 
@@ -85,17 +85,18 @@ def load_rstb(be: bool, file: Path = None) -> ResourceSizeTable:
     return table
 
 
-def _get_rstb_val(ext: str, data: bytes, should_guess: bool, be: bool) -> int:
+def _get_rstb_val(name: str, data: bytes, should_guess: bool, be: bool) -> int:
     if not hasattr(_get_rstb_val, "calc"):
         setattr(_get_rstb_val, "calc", SizeCalculator())
+    ext = name[name.rindex(".") :]
     val = _get_rstb_val.calc.calculate_file_size_with_ext(  # pylint: disable=no-member
         data, wiiu=be, ext=ext
-    )  # pylint: disable=no-member
+    )
     if val == 0 and should_guess:
         if ext in AAMP_EXTS:
-            val = guess.guess_aamp_size(data, be, ext)
+            val = guess_aamp_size(data, be, ext)
         elif ext in {".bfres", ".sbfres"}:
-            val = guess.guess_bfres_size(data, be, ext)
+            val = guess_bfres_size(data, be, name)
     return val
 
 
@@ -110,7 +111,7 @@ def _copy_file(f: Path, params: BuildParams):
         canon = get_canon_name(f.relative_to(params.mod))
         t.write_bytes(data)
         if params.table.is_file_modded(canon, data) and _should_rstb(f):
-            return {canon: _get_rstb_val(t.suffix, data, params.guess, params.be)}
+            return {canon: _get_rstb_val(t.name, data, params.guess, params.be)}
     return {}
 
 
@@ -141,7 +142,7 @@ def _build_yml(f: Path, params: BuildParams):
         if params.table.is_file_modded(canon, data) and _should_rstb(t):
             return {
                 canon: _get_rstb_val(
-                    t.suffix.replace(".s", ""), data, params.guess, params.be
+                    t.name.replace(".s", "."), data, params.guess, params.be
                 )
             }
     except Exception as e:  # pylint: disable=broad-except
@@ -401,7 +402,7 @@ def _build_actor(link: Path, params: BuildParams):
     if modified:
         return {
             f"Actor/Pack/{actor_name}.bactorpack": _get_rstb_val(
-                ".sbactorpack", sb, params.guess, params.be
+                f"{actor_name}.sbactorpack", sb, params.guess, params.be
             )
         }
     return {}
@@ -444,7 +445,7 @@ def _build_sarc(d: Path, params: BuildParams):
             rvs.update(
                 {
                     get_canon_name(d.relative_to(params.out)): _get_rstb_val(
-                        d.suffix, sb, params.guess, params.be
+                        d.name, sb, params.guess, params.be
                     )
                 }
             )
