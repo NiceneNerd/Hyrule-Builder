@@ -4,6 +4,7 @@ import json
 import shutil
 import sys
 from dataclasses import dataclass
+from io import BytesIO
 from functools import partial
 from multiprocessing import Pool
 from zlib import crc32
@@ -15,7 +16,6 @@ import oead.aamp
 from oead.yaz0 import compress
 import pymsyt
 from rstb import ResourceSizeTable, SizeCalculator
-from rstb.util import write_rstb
 
 from . import (
     AAMP_EXTS,
@@ -653,7 +653,9 @@ def build_mod(args):
                             msg = f"Added {p}, set to {v}"
                     if args.verbose and msg:
                         print(msg)
-        write_rstb(table, str(rp.with_suffix(".srsizetable")), args.be)
+        buf = BytesIO()
+        table.write(buf, args.be)
+        rp.with_suffix(".srsizetable").write_bytes(compress(buf.getvalue()))
         if rp.exists():
             rp.unlink()
 
