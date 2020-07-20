@@ -76,7 +76,7 @@ For details on building mods, see the help for the `build` command:
 ```none
 usage: hyrule_builder build [-h] [--be] [--no-rstb] [--no-guess] [--title-actors TITLE_ACTORS] [--output OUTPUT] [--single] [--verbose] directory
 
-Builds a mod into a source-like structure for editing
+Builds a mod from a source-like structure into binary game files
 
 positional arguments:
   directory             The main mod folder. For Wii U, this must contain a `content` folder and/or an `aoc` folder (the latter for DLC files). For Switch, you must use the following layout:
@@ -88,9 +88,11 @@ positional arguments:
 
 optional arguments:
   -h, --help            show this help message and exit
-  --be, -B              Use big endian where applicable
+  --be, -B, -b          Use big endian where applicable
   --no-rstb, -R         Do not auto-update RSTB
   --no-guess, -G        Do not use RSTB estimates
+  --no-warn, -W         Ignore warnings, only output success/error
+  --hard-warn, -H       Abort on any warning like an error
   --title-actors TITLE_ACTORS, -T TITLE_ACTORS
                         Comma separated list of custom actors to add to TitleBG.pack, e.g.
                         `--title-actors=Weapon_Bow_001,Enemy_Golem_Senior`
