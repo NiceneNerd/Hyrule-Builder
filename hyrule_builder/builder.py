@@ -61,6 +61,13 @@ class BuildParams:
     titles: set
     table: StockHashTable
     warn: bool
+    strict: bool
+
+    def warning(self, msg: str):
+        if self.strict:
+            raise RuntimeError(f"ERROR: {msg}")
+        elif self.warn:
+            print(f"WARNING: {msg}")
 
 
 def _should_rstb(f: Path) -> bool:
@@ -147,8 +154,9 @@ def _build_yml(f: Path, params: BuildParams):
                 )
             }
     except Exception as e:  # pylint: disable=broad-except
-        print(f"Failed to build {f.relative_to(params.mod).as_posix()}: {e}")
-        return {}
+        raise RuntimeError(
+            f"Failed to build {f.relative_to(params.mod).as_posix()}. {e}"
+        )
     if params.verbose:
         print(f"Built {f.relative_to(params.mod).as_posix()}")
     return rv
@@ -305,12 +313,11 @@ def _build_actor(link: Path, params: BuildParams):
                             phys_source / "Ragdoll" / rg_path
                         )
                     else:
-                        if params.warn:
-                            print(
-                                f"WARNING: Havok ragdoll file Physics/Ragdoll/{rg_path} not found "
-                                f"for actor {actor_name}. Ignore if intentionally using a file not "
-                                "in the actor pack."
-                            )
+                        params.warning(
+                            f"Havok ragdoll file Physics/Ragdoll/{rg_path} not found "
+                            f"for actor {actor_name}. Ignore if intentionally using a file not "
+                            "in the actor pack."
+                        )
                 if types.params["use_support_bone"].v:
                     sb_path = str(
                         phys.lists["ParamSet"]
@@ -323,12 +330,11 @@ def _build_actor(link: Path, params: BuildParams):
                             phys_source / "SupportBone" / sb_path
                         )
                     else:
-                        if params.warn:
-                            print(
-                                f"WARNING: Havok support bone file Physics/SupportBone/{sb_path} "
-                                f"not found for actor {actor_name}. Ignore if intentionally using "
-                                "a file not in the actor pack."
-                            )
+                        params.warning(
+                            f"Havok support bone file Physics/SupportBone/{sb_path} "
+                            f"not found for actor {actor_name}. Ignore if intentionally using "
+                            "a file not in the actor pack."
+                        )
                 if types.params["use_cloth"].v:
                     cloth_path = str(
                         phys.lists["ParamSet"]
@@ -342,12 +348,11 @@ def _build_actor(link: Path, params: BuildParams):
                             phys_source / "Cloth" / cloth_path
                         )
                     else:
-                        if params.warn:
-                            print(
-                                f"WARNING: Havok cloth file Physics/Cloth/{cloth_path} not found "
-                                f"for actor {actor_name}. Ignore if intentionally using a file not "
-                                "in the actor pack."
-                            )
+                        params.warning(
+                            f"Havok cloth file Physics/Cloth/{cloth_path} not found "
+                            f"for actor {actor_name}. Ignore if intentionally using a file not "
+                            "in the actor pack."
+                        )
                 if types.params["use_rigid_body_set_num"].v > 0:
                     for _, rigid in (
                         phys.lists["ParamSet"].lists["RigidBodySet"].lists.items()
@@ -361,13 +366,12 @@ def _build_actor(link: Path, params: BuildParams):
                                     phys_source / "RigidBody" / rigid_path
                                 )
                             else:
-                                if params.warn:
-                                    print(
-                                        "WARNING: Havok rigid body file "
-                                        f"Physics/RigidBody/{rigid_path} not found for actor "
-                                        f"{actor_name}. Ignore if intentionally using a file not in"
-                                        " the actor pack."
-                                    )
+                                params.warning(
+                                    "Havok rigid body file "
+                                    f"Physics/RigidBody/{rigid_path} not found for actor "
+                                    f"{actor_name}. Ignore if intentionally using a file not in"
+                                    " the actor pack."
+                                )
                         except KeyError:
                             continue
         for name, path in files.items():
@@ -378,8 +382,9 @@ def _build_actor(link: Path, params: BuildParams):
             ):
                 modified = True
     except FileNotFoundError as e:
-        print(
-            f'Failed to build actor "{actor_name}": Could not find linked file "{e.filename}".'
+        params.warning(
+            f'Failed to build actor "{actor_name}". Could not find linked file "'
+            f'{Path(e.filename).relative_to(params.out)}".'
         )
         return {}
     _, sb = pack.write()
@@ -457,7 +462,7 @@ def _build_sarc(d: Path, params: BuildParams):
             else compress(sb)
         )
     except:
-        print(f"Failed to build {d.relative_to(params.out).as_posix()}")
+        params.warning(f"Failed to build {d.relative_to(params.out).as_posix()}")
         return {}
     else:
         if params.verbose:
@@ -495,7 +500,7 @@ def build_mod(args):
             "The specified directory does not appear to have a valid folder structure."
         )
         print("Run `hyrule_builder build --help` for more information.")
-        exit(2)
+        sys.exit(2)
     out = mod.with_name(f"{mod.name}_build") if not args.output else Path(args.output)
     if out.exists():
         print("Removing old build...")
@@ -511,7 +516,8 @@ def build_mod(args):
         aoc=aoc,
         titles=set(args.title_actors.split(",")),
         table=StockHashTable(args.be),
-        warn=not args.suppress_warn,
+        warn=not args.no_warn,
+        strict=args.hard_warn,
     )
 
     print("Scanning source files...")
@@ -560,7 +566,11 @@ def build_mod(args):
         for f in yml_files:
             rvs.update(_build_yml(f, params))
     else:
-        results = p.map(partial(_build_yml, params=params), yml_files)
+        try:
+            results = p.map(partial(_build_yml, params=params), yml_files)
+        except RuntimeError as err:
+            print(err)
+            sys.exit(1)
         for r in results:
             rvs.update(r)
 
@@ -572,7 +582,11 @@ def build_mod(args):
             for a in actors:
                 rvs.update(_build_actor(a, params))
         else:
-            results = p.map(partial(_build_actor, params=params), actors)
+            try:
+                results = p.map(partial(_build_actor, params=params), actors)
+            except RuntimeError as err:
+                print(err)
+                sys.exit(1)
             for r in results:
                 rvs.update(r)
     for d in (out / content / "Physics").glob("*"):

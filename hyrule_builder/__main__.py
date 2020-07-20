@@ -21,7 +21,7 @@ def main() -> None:
         aliases=["b"],
     )
     b_parser.add_argument(
-        "--be", "-B", help="Use big endian where applicable", action="store_true"
+        "--be", "-B", "-b", help="Use big endian where applicable", action="store_true"
     )
     b_parser.add_argument(
         "--no-rstb", "-R", help="Do not auto-update RSTB", action="store_true"
@@ -30,10 +30,16 @@ def main() -> None:
         "--no-guess", "-G", help="Do not use RSTB estimates", action="store_true"
     )
     b_parser.add_argument(
-        "--suppress-warn",
+        "--no-warn",
         "-W",
         help="Ignore warnings, only output success/error",
         action="store_true",
+    )
+    b_parser.add_argument(
+        "--hard-warn",
+        "-H",
+        help="Abort on any warning like an error",
+        action="store_true"
     )
     b_parser.add_argument(
         "--title-actors",
