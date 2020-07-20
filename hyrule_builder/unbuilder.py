@@ -75,6 +75,7 @@ def rstb_to_json(rstb: ResourceSizeTable, output: Path, names: set):
             },
             ensure_ascii=False,
             indent=2,
+            sort_keys=True
         )
     )
 
