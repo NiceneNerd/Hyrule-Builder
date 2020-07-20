@@ -2,6 +2,7 @@
 # pylint: disable=unsupported-assignment-operation
 import json
 import shutil
+import sys
 from dataclasses import dataclass
 from functools import partial
 from multiprocessing import Pool
@@ -156,6 +157,7 @@ def _build_yml(f: Path, params: BuildParams):
 LINK_MAP = {
     3293308145: "AIProgram/*.baiprog",
     2851261459: "AISchedule/*.baischedule",
+    1241489578: "AnimationInfo/*.baniminfo",
     1767976113: "Awareness/*.bawareness",
     713857735: "BoneControl/*.bbonectrl",
     2863165669: "Chemical/*.bchemical",
@@ -489,9 +491,11 @@ def build_mod(args):
     aoc = "aoc" if args.be else "01007EF00011F001/romfs"
     mod = Path(args.directory)
     if not ((mod / content).exists() or (mod / aoc).exists()):
-        print("The specified directory is not valid: no content or DLC folder found")
+        print(
+            "The specified directory does not appear to have a valid folder structure."
+        )
         print("Run `hyrule_builder build --help` for more information.")
-        exit(1)
+        exit(2)
     out = mod.with_name(f"{mod.name}_build") if not args.output else Path(args.output)
     if out.exists():
         print("Removing old build...")
@@ -514,7 +518,9 @@ def build_mod(args):
     files = {
         f
         for f in mod.rglob("**/*")
-        if f.is_file() and "ActorInfo" not in f.parts and not f.parts[0].startswith(".")
+        if f.is_file()
+        and "ActorInfo" not in f.parts
+        and not str(f.relative_to(mod)).startswith(".")
     }
     other_files = {f for f in files if f.suffix not in {".yml", ".msyt"}}
     yml_files = {f for f in files if f.suffix == ".yml"}
