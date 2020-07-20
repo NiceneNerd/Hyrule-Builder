@@ -63,8 +63,8 @@ def rstb_to_json(rstb: ResourceSizeTable, output: Path, names: set):
     hash_map = {crc32(h.encode("utf8")): h for h in STOCK_FILES}
     hash_map.update({crc32(name.encode("utf8")): name for name in names})
 
-    def hash_to_name(crc: int) -> Union[str, int]:
-        return hash_map[crc] if crc in hash_map else crc
+    def hash_to_name(crc: int) -> str:
+        return hash_map[crc] if crc in hash_map else str(crc)
 
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
