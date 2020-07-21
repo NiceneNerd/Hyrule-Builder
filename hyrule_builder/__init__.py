@@ -165,7 +165,27 @@ BYML_EXTS = {
     ".bgsvdata",
     ".sbgsvdata",
 }
+RSTB_EXCLUDE_EXTS = {
+    ".pack",
+    ".bgdata",
+    ".txt",
+    ".bgsvdata",
+    ".yml",
+    ".json",
+    ".ps1",
+    ".bak",
+    ".bat",
+    ".ini",
+    ".png",
+    ".bfstm",
+    ".py",
+    ".sh",
+    ".old",
+    ".stera",
+}
+RSTB_EXCLUDE_NAMES = {"ActorInfo.product.byml", ".done"}
 EXEC_DIR = Path(os.path.dirname(os.path.realpath(__file__)))
+NAMES = Path.home() / ".hybuild" / "names.json"
 
 
 def is_in_sarc(file: Path) -> bool:

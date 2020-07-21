@@ -23,30 +23,12 @@ from . import (
     EXEC_DIR,
     SARC_EXTS,
     STOCK_FILES,
+    RSTB_EXCLUDE_EXTS,
+    RSTB_EXCLUDE_NAMES,
     Path,
     get_canon_name,
     is_in_sarc,
 )
-
-RSTB_EXCLUDE_EXTS = {
-    ".pack",
-    ".bgdata",
-    ".txt",
-    ".bgsvdata",
-    ".yml",
-    ".json",
-    ".ps1",
-    ".bak",
-    ".bat",
-    ".ini",
-    ".png",
-    ".bfstm",
-    ".py",
-    ".sh",
-    ".old",
-    ".stera",
-}
-RSTB_EXCLUDE_NAMES = {"ActorInfo.product.byml", ".done"}
 
 
 @dataclass
@@ -97,14 +79,28 @@ def _get_rstb_val(name: str, data: bytes, should_guess: bool, be: bool) -> int:
     if not hasattr(_get_rstb_val, "calc"):
         setattr(_get_rstb_val, "calc", SizeCalculator())
     ext = name[name.rindex(".") :]
+    if data[:4] == b"Yaz0":
+        data = oead.yaz0.decompress(data)
     val = _get_rstb_val.calc.calculate_file_size_with_ext(  # pylint: disable=no-member
         data, wiiu=be, ext=ext
     )
+    if ext == ".bdmgparam":
+        val += 1000
+    elif ext == ".hkrb":
+        val += 40
     if val == 0 and should_guess:
         if ext in AAMP_EXTS:
             val = guess_aamp_size(data, be, ext)
         elif ext in {".bfres", ".sbfres"}:
             val = guess_bfres_size(data, be, name)
+        elif ext == ".baniminfo":
+            val = int(
+                (((len(data) + 31) & -32) * (1.5 if len(data) > 36864 else 4))
+                + 0xE4
+                + 0x24C
+            )
+            if not be:
+                val *= 1.5
     return val
 
 
@@ -252,6 +248,7 @@ def _build_actor(link: Path, params: BuildParams):
     actor_path = params.out / params.content / "Actor"
     targets = actor.objects["LinkTarget"]
     modified = False
+    rvs = {}
     try:
         files = {f"Actor/ActorLink/{actor_name}.bxml": link}
         for p, name in targets.params.items():
@@ -377,10 +374,11 @@ def _build_actor(link: Path, params: BuildParams):
         for name, path in files.items():
             data = path.read_bytes()
             pack.files[name] = data
-            if not modified and params.table.is_file_modded(
-                name.replace(".s", ""), memoryview(data), True
-            ):
-                modified = True
+            canon = name.replace(".s", ".")
+            if params.table.is_file_modded(canon, memoryview(data), True):
+                if not modified:
+                    modified = True
+                rvs.update({canon: _get_rstb_val(canon, data, params.guess, params.be)})
     except FileNotFoundError as e:
         params.warning(
             f'Failed to build actor "{actor_name}". Could not find linked file "'
@@ -407,12 +405,14 @@ def _build_actor(link: Path, params: BuildParams):
         dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(compress(sb))
     if modified:
-        return {
-            f"Actor/Pack/{actor_name}.bactorpack": _get_rstb_val(
-                f"{actor_name}.sbactorpack", sb, params.guess, params.be
-            )
-        }
-    return {}
+        rvs.update(
+            {
+                f"Actor/Pack/{actor_name}.bactorpack": _get_rstb_val(
+                    f"{actor_name}.sbactorpack", sb, params.guess, params.be
+                )
+            }
+        )
+    return rvs
 
 
 def _build_sarc(d: Path, params: BuildParams):
@@ -443,7 +443,20 @@ def _build_sarc(d: Path, params: BuildParams):
         f: Path
         for f in {f for f in d.rglob("**/*") if f.is_file()}:
             path = f.relative_to(d).as_posix()
-            s.files[lead + path] = f.read_bytes()
+            canon = path.replace(".s", ".")
+            data = f.read_bytes()
+            if (
+                f.suffix not in SARC_EXTS | AAMP_EXTS | BYML_EXTS | RSTB_EXCLUDE_EXTS
+                and d.suffix not in {".sarc", ".ssarc"}
+            ) and params.table.is_file_modded(canon, data, flag_new=True):
+                rvs.update(
+                    {
+                        canon: _get_rstb_val(
+                            path, data, params.guess, params.be
+                        )
+                    }
+                )
+            s.files[lead + path] = data
             f.unlink()
 
         shutil.rmtree(d)
@@ -461,8 +474,8 @@ def _build_sarc(d: Path, params: BuildParams):
             if not (d.suffix.startswith(".s") and d.suffix != ".sarc")
             else compress(sb)
         )
-    except:
-        params.warning(f"Failed to build {d.relative_to(params.out).as_posix()}")
+    except Exception as err:  # pylint: disable=broad-except
+        params.warning(f"Failed to build {d.relative_to(params.out).as_posix()}. {err}")
         return {}
     else:
         if params.verbose:
@@ -573,6 +586,11 @@ def build_mod(args):
             sys.exit(1)
         for r in results:
             rvs.update(r)
+
+    main_aoc = Path(aoc) / ("0010" if params.be else "")
+    if (params.out / main_aoc / "Map" / "MainField").exists():
+        (params.out / main_aoc / "Pack").mkdir(parents=True, exist_ok=True)
+        (params.out / main_aoc / "Pack" / "AocMainField.pack").write_bytes(b"")
 
     actors = {f for f in (out / content / "Actor" / "ActorLink").glob("*.bxml")}
     if actors:

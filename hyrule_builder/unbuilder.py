@@ -11,12 +11,21 @@ from zlib import crc32
 
 import oead
 from oead import aamp
-from oead.yaz0 import decompress # pylint: disable=import-error
+from oead.yaz0 import decompress  # pylint: disable=import-error
 import pymsyt
 from rstb import ResourceSizeTable
 from rstb.util import read_rstb
 
-from . import AAMP_EXTS, BYML_EXTS, SARC_EXTS, STOCK_FILES, get_canon_name
+from . import (
+    AAMP_EXTS,
+    BYML_EXTS,
+    SARC_EXTS,
+    STOCK_FILES,
+    get_canon_name,
+    NAMES,
+    RSTB_EXCLUDE_EXTS,
+    RSTB_EXCLUDE_NAMES,
+)
 
 HANDLED = {"ResourceSizeTable.product.srsizetable", "ActorInfo.product.sbyml"}
 
@@ -61,7 +70,15 @@ def _unbuild_file(f: Path, out: Path, content: str, mod: Path, verbose: bool) ->
 
 def rstb_to_json(rstb: ResourceSizeTable, output: Path, names: set):
     hash_map = {crc32(h.encode("utf8")): h for h in STOCK_FILES}
-    hash_map.update({crc32(name.encode("utf8")): name for name in names})
+    found_names = {
+        crc32(name.encode("utf8")): name
+        for name in names
+        if name[name.rindex(".") :] not in RSTB_EXCLUDE_EXTS
+        and name not in RSTB_EXCLUDE_NAMES
+    }
+    hash_map.update(found_names)
+    saved_names = json.load(NAMES.open("r", encoding="utf-8")) if NAMES.exists() else {}
+    hash_map.update(saved_names)
 
     def hash_to_name(crc: int) -> str:
         return hash_map[crc] if crc in hash_map else str(crc)
@@ -75,8 +92,13 @@ def rstb_to_json(rstb: ResourceSizeTable, output: Path, names: set):
             },
             ensure_ascii=False,
             indent=2,
-            sort_keys=True
+            sort_keys=True,
         )
+    )
+
+    NAMES.parent.mkdir(parents=True, exist_ok=True)
+    NAMES.write_text(
+        json.dumps({**found_names, **saved_names}, ensure_ascii=False), encoding="utf-8"
     )
 
 
