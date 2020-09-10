@@ -252,7 +252,7 @@ def unbuild_mod(args) -> None:
 
     try:
         (out / content / "Actor" / "Pack").rmdir()
-    except PermissionError:
+    except (PermissionError, OSError, FileNotFoundError):
         pass
 
     print("Unpacking actor info...")
