@@ -17,7 +17,10 @@ def main() -> None:
 
     b_parser = subparsers.add_parser(
         "build",
-        description="Builds a mod from a source-like structure into binary game files",
+        description=(
+            "Builds a mod from a source-like structure into binary game files\n"
+            "Note: Flags can be set using a config.yml file. See readme for details."
+        ),
         aliases=["b"],
     )
     b_parser.add_argument(
@@ -39,7 +42,7 @@ def main() -> None:
         "--hard-warn",
         "-H",
         help="Abort on any warning like an error",
-        action="store_true"
+        action="store_true",
     )
     b_parser.add_argument(
         "--title-actors",

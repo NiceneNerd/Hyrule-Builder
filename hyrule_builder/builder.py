@@ -131,6 +131,8 @@ def _build_aamp(f: Path) -> bytes:
 
 def _build_yml(f: Path, params: BuildParams):
     rv = {}
+    if f.name == "config.yml":
+        return rv
     try:
         ext = f.with_suffix("").suffix
         t = params.out / f.relative_to(params.mod).with_suffix("")
@@ -449,13 +451,7 @@ def _build_sarc(d: Path, params: BuildParams):
                 f.suffix not in SARC_EXTS | AAMP_EXTS | BYML_EXTS | RSTB_EXCLUDE_EXTS
                 and d.suffix not in {".sarc", ".ssarc"}
             ) and params.table.is_file_modded(canon, data, flag_new=True):
-                rvs.update(
-                    {
-                        canon: _get_rstb_val(
-                            path, data, params.guess, params.be
-                        )
-                    }
-                )
+                rvs.update({canon: _get_rstb_val(path, data, params.guess, params.be)})
             s.files[lead + path] = data
             f.unlink()
 
@@ -504,10 +500,29 @@ def _build_actorinfo(params: BuildParams):
     )
 
 
+def _parse_config(path: Path, args) -> {}:
+    meta = {}
+    config = oead.byml.from_text(path.read_text("utf8"))
+    if "Flags" in config:
+        for flag in config["Flags"]:
+            setattr(args, flag.replace("-", "_"), True)
+    if "Options" in config:
+        for key, val in config["Options"].items():
+            setattr(args, key.replace("-", "_"), val)
+    if "Meta" in config:
+        for key, val in config["Meta"].items():
+            meta[key] = val
+    return meta
+
+
 def build_mod(args):
+    mod = Path(args.directory)
+    meta = {}
+    if (mod / "config.yml").exists():
+        meta = _parse_config(mod / "config.yml", args)
+
     content = "content" if args.be else "01007EF00011E000/romfs"
     aoc = "aoc" if args.be else "01007EF00011F001/romfs"
-    mod = Path(args.directory)
     if not ((mod / content).exists() or (mod / aoc).exists()):
         print(
             "The specified directory does not appear to have a valid folder structure."
@@ -676,5 +691,19 @@ def build_mod(args):
         rp.with_suffix(".srsizetable").write_bytes(compress(buf.getvalue()))
         if rp.exists():
             rp.unlink()
+
+    if meta:
+        with (out / "rules.txt").open("w", encoding="utf-8") as rules:
+            rules.write("[Definition]\n")
+            rules.write(
+                "titleIds = 00050000101C9300,00050000101C9400,00050000101C9500\n"
+            )
+            for key, val in meta.items():
+                rules.write(f"{key} = {val}\n")
+            if "path" not in meta and "name" in meta:
+                rules.write(
+                    f"path = The Legend of Zelda: Breath of the Wild/Mods/{meta['name']}\n"
+                )
+            rules.write("version = 4\n")
 
     print("Mod built successfully")

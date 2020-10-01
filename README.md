@@ -77,6 +77,7 @@ For details on building mods, see the help for the `build` command:
 usage: hyrule_builder build [-h] [--be] [--no-rstb] [--no-guess] [--title-actors TITLE_ACTORS] [--output OUTPUT] [--single] [--verbose] directory
 
 Builds a mod from a source-like structure into binary game files
+Note: Flags can be set using a config.yml file. See readme for details.
 
 positional arguments:
   directory             The main mod folder. For Wii U, this must contain a `content` folder and/or an `aoc` folder (the latter for DLC files). For Switch, you must use the following layout:
@@ -105,6 +106,23 @@ optional arguments:
 Note that endianness can be inferred on `unbuild`, but using `build` for Wii U/Cemu mods *requires* the `--be` flag.
 
 Unless `--no-rstb` is used, building a mod will automatically generate an updated RSTB file.
+
+As the help says, instead of using command line arguments, you can also configure the build command by providing a `config.yml`
+file. It supports up to three sections, each of which is optional. The `Meta` section provides data that will be written
+into a `rules.txt` file in the output mod. The `Flags` section turns simple switch flags on by name in a list. The `Options`
+section is for flags that store arbitary values, like `title-actors` or `output`. An example config file is included below:
+
+```yaml
+Meta: # specify data to go into a rules.txt file here
+  name: A Mod
+  description: My new mod
+Flags: # list the switch flags you want turned on
+  - be
+  - no-warn
+Options: # provide values for customizable flags
+  title-actors: Weapon_Bow_001,Enemy_Lizalfos_Senior
+  output: test/TestMod_built
+```
 
 ### Notes on Project Layout
 
