@@ -241,152 +241,136 @@ TITLE_ACTORS = {
 }
 
 
+def _parse_actor_link(link: Path, params: BuildParams) -> {}:
+    actor_name = link.stem
+    if link.suffix == ".yml":
+        actor = oead.aamp.ParameterIO.from_text(link.read_text("utf-8"))
+    else:
+        actor = oead.aamp.ParameterIO.from_binary(link.read_bytes())
+    actor_path = params.out / params.content / "Actor"
+    targets = actor.objects["LinkTarget"]
+    files = {f"Actor/ActorLink/{actor_name}.bxml": link}
+    for p, name in targets.params.items():
+        name = name.v
+        if name == "Dummy":
+            continue
+        if p.hash in LINK_MAP:
+            path = LINK_MAP[p.hash].replace("*", name)
+            files["Actor/" + path] = actor_path / path
+        elif p == 110127898:  # ASUser
+            list_path = actor_path / "ASList" / f"{name}.baslist"
+            aslist_bytes = list_path.read_bytes()
+            files[f"Actor/ASList/{name}.baslist"] = list_path
+            aslist = oead.aamp.ParameterIO.from_binary(aslist_bytes)
+            for _, anim in aslist.lists["ASDefines"].objects.items():
+                filename = anim.params["Filename"].v
+                if filename != "Dummy":
+                    files[f"Actor/AS/{filename}.bas"] = (
+                        actor_path / "AS" / f"{filename}.bas"
+                    )
+        elif p == 1086735552:  # AttentionUser
+            list_path = actor_path / "AttClientList" / f"{name}.batcllist"
+            atcllist_bytes = list_path.read_bytes()
+            files[f"Actor/AttClientList/{name}.batcllist"] = list_path
+            atcllist = oead.aamp.ParameterIO.from_binary(atcllist_bytes)
+            for _, atcl in atcllist.lists["AttClients"].objects.items():
+                filename = atcl.params["FileName"].v
+                if filename != "Dummy":
+                    files[f"Actor/AttClient/{filename}.batcl"] = (
+                        actor_path / "AttClient" / f"{filename}.batcl"
+                    )
+        elif p == 4022948047:  # RgConfigListUser
+            list_path = actor_path / "RagdollConfigList" / f"{name}.brgconfiglist"
+            rgconfiglist_bytes = list_path.read_bytes()
+            files[f"Actor/RagdollConfigList/{name}.brgconfiglist"] = list_path
+            rgconfiglist = oead.aamp.ParameterIO.from_binary(rgconfiglist_bytes)
+            for _, impl in rgconfiglist.lists["ImpulseParamList"].objects.items():
+                filename = impl.params["FileName"].v
+                if filename != "Dummy":
+                    files[f"Actor/RagdollConfig/{filename}.brgconfig"] = (
+                        actor_path / "RagdollConfig" / f"{filename}.brgconfig"
+                    )
+        elif p == 2366604039:  # PhysicsUser
+            phys_source = params.out / params.content / "Physics"
+            phys_path = actor_path / "Physics" / f"{name}.bphysics"
+            phys_bytes = phys_path.read_bytes()
+            files[f"Actor/Physics/{name}.bphysics"] = phys_path
+            phys = oead.aamp.ParameterIO.from_binary(phys_bytes)
+            types = phys.lists["ParamSet"].objects[1258832850]
+            if types.params["use_ragdoll"].v:
+                rg_path = str(
+                    phys.lists["ParamSet"]
+                    .objects["Ragdoll"]
+                    .params["ragdoll_setup_file_path"]
+                    .v
+                )
+                files[f"Physics/Ragdoll/{rg_path}"] = phys_source / "Ragdoll" / rg_path
+            if types.params["use_support_bone"].v:
+                sb_path = str(
+                    phys.lists["ParamSet"]
+                    .objects["SupportBone"]
+                    .params["support_bone_setup_file_path"]
+                    .v
+                )
+                files[f"Physics/SupportBone/{sb_path}"] = (
+                    phys_source / "SupportBone" / sb_path
+                )
+            if types.params["use_cloth"].v:
+                cloth_path = str(
+                    phys.lists["ParamSet"]
+                    .lists["Cloth"]
+                    .objects["ClothHeader"]
+                    .params["cloth_setup_file_path"]
+                    .v
+                )
+                files[f"Physics/Cloth/{cloth_path}"] = (
+                    phys_source / "Cloth" / cloth_path
+                )
+            if types.params["use_rigid_body_set_num"].v > 0:
+                for _, rigid in (
+                    phys.lists["ParamSet"].lists["RigidBodySet"].lists.items()
+                ):
+                    try:
+                        rigid_path = str(
+                            rigid.objects[4288596824].params["setup_file_path"].v
+                        )
+                        files[f"Physics/RigidBody/{rigid_path}"] = (
+                            phys_source / "RigidBody" / rigid_path
+                        )
+                    except KeyError:
+                        continue
+    return files
+
+
 def _build_actor(link: Path, params: BuildParams):
     pack = oead.SarcWriter(
         endian=oead.Endianness.Big if params.be else oead.Endianness.Little
     )
     actor_name = link.stem
-    actor = oead.aamp.ParameterIO.from_binary(link.read_bytes())
-    actor_path = params.out / params.content / "Actor"
-    targets = actor.objects["LinkTarget"]
     modified = False
     rvs = {}
-    try:
-        files = {f"Actor/ActorLink/{actor_name}.bxml": link}
-        for p, name in targets.params.items():
-            name = name.v
-            if name == "Dummy":
-                continue
-            if p.hash in LINK_MAP:
-                path = LINK_MAP[p.hash].replace("*", name)
-                files["Actor/" + path] = actor_path / path
-            elif p == 110127898:  # ASUser
-                list_path = actor_path / "ASList" / f"{name}.baslist"
-                aslist_bytes = list_path.read_bytes()
-                files[f"Actor/ASList/{name}.baslist"] = list_path
-                aslist = oead.aamp.ParameterIO.from_binary(aslist_bytes)
-                for _, anim in aslist.lists["ASDefines"].objects.items():
-                    filename = anim.params["Filename"].v
-                    if filename != "Dummy":
-                        files[f"Actor/AS/{filename}.bas"] = (
-                            actor_path / "AS" / f"{filename}.bas"
-                        )
-            elif p == 1086735552:  # AttentionUser
-                list_path = actor_path / "AttClientList" / f"{name}.batcllist"
-                atcllist_bytes = list_path.read_bytes()
-                files[f"Actor/AttClientList/{name}.batcllist"] = list_path
-                atcllist = oead.aamp.ParameterIO.from_binary(atcllist_bytes)
-                for _, atcl in atcllist.lists["AttClients"].objects.items():
-                    filename = atcl.params["FileName"].v
-                    if filename != "Dummy":
-                        files[f"Actor/AttClient/{filename}.batcl"] = (
-                            actor_path / "AttClient" / f"{filename}.batcl"
-                        )
-            elif p == 4022948047:  # RgConfigListUser
-                list_path = actor_path / "RagdollConfigList" / f"{name}.brgconfiglist"
-                rgconfiglist_bytes = list_path.read_bytes()
-                files[f"Actor/RagdollConfigList/{name}.brgconfiglist"] = list_path
-                rgconfiglist = oead.aamp.ParameterIO.from_binary(rgconfiglist_bytes)
-                for _, impl in rgconfiglist.lists["ImpulseParamList"].objects.items():
-                    filename = impl.params["FileName"].v
-                    if filename != "Dummy":
-                        files[f"Actor/RagdollConfig/{filename}.brgconfig"] = (
-                            actor_path / "RagdollConfig" / f"{filename}.brgconfig"
-                        )
-            elif p == 2366604039:  # PhysicsUser
-                phys_source = params.out / params.content / "Physics"
-                phys_path = actor_path / "Physics" / f"{name}.bphysics"
-                phys_bytes = phys_path.read_bytes()
-                files[f"Actor/Physics/{name}.bphysics"] = phys_path
-                phys = oead.aamp.ParameterIO.from_binary(phys_bytes)
-                types = phys.lists["ParamSet"].objects[1258832850]
-                if types.params["use_ragdoll"].v:
-                    rg_path = str(
-                        phys.lists["ParamSet"]
-                        .objects["Ragdoll"]
-                        .params["ragdoll_setup_file_path"]
-                        .v
-                    )
-                    if (phys_source / "Ragdoll" / rg_path).exists():
-                        files[f"Physics/Ragdoll/{rg_path}"] = (
-                            phys_source / "Ragdoll" / rg_path
-                        )
-                    else:
-                        params.warning(
-                            f"Havok ragdoll file Physics/Ragdoll/{rg_path} not found "
-                            f"for actor {actor_name}. Ignore if intentionally using a file not "
-                            "in the actor pack."
-                        )
-                if types.params["use_support_bone"].v:
-                    sb_path = str(
-                        phys.lists["ParamSet"]
-                        .objects["SupportBone"]
-                        .params["support_bone_setup_file_path"]
-                        .v
-                    )
-                    if (phys_source / "SupportBone" / sb_path).exists():
-                        files[f"Physics/SupportBone/{sb_path}"] = (
-                            phys_source / "SupportBone" / sb_path
-                        )
-                    else:
-                        params.warning(
-                            f"Havok support bone file Physics/SupportBone/{sb_path} "
-                            f"not found for actor {actor_name}. Ignore if intentionally using "
-                            "a file not in the actor pack."
-                        )
-                if types.params["use_cloth"].v:
-                    cloth_path = str(
-                        phys.lists["ParamSet"]
-                        .lists["Cloth"]
-                        .objects["ClothHeader"]
-                        .params["cloth_setup_file_path"]
-                        .v
-                    )
-                    if (phys_source / "Cloth" / cloth_path).exists():
-                        files[f"Physics/Cloth/{cloth_path}"] = (
-                            phys_source / "Cloth" / cloth_path
-                        )
-                    else:
-                        params.warning(
-                            f"Havok cloth file Physics/Cloth/{cloth_path} not found "
-                            f"for actor {actor_name}. Ignore if intentionally using a file not "
-                            "in the actor pack."
-                        )
-                if types.params["use_rigid_body_set_num"].v > 0:
-                    for _, rigid in (
-                        phys.lists["ParamSet"].lists["RigidBodySet"].lists.items()
-                    ):
-                        try:
-                            rigid_path = str(
-                                rigid.objects[4288596824].params["setup_file_path"].v
-                            )
-                            if (phys_source / "RigidBody" / rigid_path).exists():
-                                files[f"Physics/RigidBody/{rigid_path}"] = (
-                                    phys_source / "RigidBody" / rigid_path
-                                )
-                            else:
-                                params.warning(
-                                    "Havok rigid body file "
-                                    f"Physics/RigidBody/{rigid_path} not found for actor "
-                                    f"{actor_name}. Ignore if intentionally using a file not in"
-                                    " the actor pack."
-                                )
-                        except KeyError:
-                            continue
-        for name, path in files.items():
+    files = _parse_actor_link(link, params)
+    for name, path in files.items():
+        try:
             data = path.read_bytes()
-            pack.files[name] = data
-            canon = name.replace(".s", ".")
-            if params.table.is_file_modded(canon, memoryview(data), True):
-                if not modified:
-                    modified = True
-                rvs.update({canon: _get_rstb_val(canon, data, params.guess, params.be)})
-    except FileNotFoundError as e:
-        params.warning(
-            f'Failed to build actor "{actor_name}". Could not find linked file "'
-            f'{Path(e.filename).relative_to(params.out)}".'
-        )
-        return {}
+        except FileNotFoundError as e:
+            if name.startswith("Physics"):
+                params.warning(
+                    f"Havok physics file {name} not found for actor {actor_name}. "
+                    "Ignore if intentionally using a file not in the actor pack."
+                )
+                continue
+            params.warning(
+                f'Failed to build actor "{actor_name}". Could not find linked file "'
+                f'{Path(e.filename).relative_to(params.out)}".'
+            )
+            return {}
+        pack.files[name] = data
+        canon = name.replace(".s", ".")
+        if params.table.is_file_modded(canon, memoryview(data), True):
+            if not modified:
+                modified = True
+            rvs.update({canon: _get_rstb_val(canon, data, params.guess, params.be)})
     _, sb = pack.write()
     dest: Path
     if actor_name in TITLE_ACTORS | params.titles:
