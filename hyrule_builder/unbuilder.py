@@ -34,7 +34,9 @@ def _if_unyaz(data: bytes) -> bytes:
     return data if data[0:4] != b"Yaz0" else decompress(data)
 
 
-def _unbuild_file(f: Path, out: Path, content: str, mod: Path, verbose: bool) -> set:
+def _unbuild_file(
+    f: Path, out: Path, content: str, mod: Path, verbose: bool, skip_texts: bool = False
+) -> set:
     of = out / f.relative_to(mod)
     if not of.parent.exists():
         of.parent.mkdir(parents=True, exist_ok=True)
@@ -59,7 +61,7 @@ def _unbuild_file(f: Path, out: Path, content: str, mod: Path, verbose: bool) ->
         if "bactorpack" in f.suffix:
             names.update(_unbuild_actorpack(s, out / content))
         else:
-            names.update(_unbuild_sarc(s, of))
+            names.update(_unbuild_sarc(s, of, skip_texts=skip_texts))
         del s
     else:
         of.write_bytes(f.read_bytes())
@@ -136,7 +138,9 @@ def _unbuild_actorpack(s: oead.Sarc, output: Path):
     return {f.name for f in s.get_files()}
 
 
-def _unbuild_sarc(s: oead.Sarc, output: Path, skip_actorpack: bool = False):
+def _unbuild_sarc(
+    s: oead.Sarc, output: Path, skip_actorpack: bool = False, skip_texts: bool = False
+):
     SKIP_SARCS = {
         "tera_resource.Cafe_Cafe_GX2.release.ssarc",
         "tera_resource.Nin_NX_NVN.release.ssarc",
@@ -156,7 +160,7 @@ def _unbuild_sarc(s: oead.Sarc, output: Path, skip_actorpack: bool = False):
         osf.parent.mkdir(parents=True, exist_ok=True)
         ext = osf.suffix
         if ext in SARC_EXTS:
-            if osf.name in SKIP_SARCS:
+            if osf.name in SKIP_SARCS or (osf.name.startswith("Msg_") and skip_texts):
                 osf.write_bytes(sarc_file.data)
                 continue
             try:
@@ -168,7 +172,7 @@ def _unbuild_sarc(s: oead.Sarc, output: Path, skip_actorpack: bool = False):
                 ):
                     names.update(_unbuild_actorpack(ss, output.parent.parent))
                 else:
-                    names.update(_unbuild_sarc(ss, osf))
+                    names.update(_unbuild_sarc(ss, osf, skip_texts=skip_texts))
                 del ss
             except ValueError:
                 osf.write_bytes(b"")
@@ -243,6 +247,7 @@ def unbuild_mod(args) -> None:
                     content=content,
                     out=out,
                     verbose=args.verbose,
+                    skip_texts=args.no_texts,
                 ),
                 files,
             )

@@ -59,6 +59,12 @@ def main() -> None:
         description="Unbuilds a mod into a source-like structure for editing",
         aliases=["u"],
     )
+    u_parser.add_argument(
+        "--no-texts",
+        "-T",
+        help="Do not unbuild game text (message SARCs)",
+        action="store_true",
+    )
     u_parser.add_argument("--output", "-O", help="Output folder for unbuilt mod")
     u_parser.set_defaults(func=unbuilder.unbuild_mod)
 
