@@ -1,4 +1,4 @@
-# Hyrule-Builder
+# Hyrule Builder
 
 A mod building tool for _The Legend of Zelda: Breath of the Wild_.
 
