@@ -139,7 +139,7 @@ def _build_yml(f: Path, params: BuildParams):
         if not t.parent.exists():
             t.parent.mkdir(parents=True, exist_ok=True)
         data: bytes
-        if ext in BYML_EXTS:
+        if ext in BYML_EXTS | {".info"}:
             data = _build_byml(f, params.be)
         elif ext in AAMP_EXTS:
             data = _build_aamp(f)
@@ -465,10 +465,11 @@ def _build_sarc(d: Path, params: BuildParams):
 
 def _build_actorinfo(params: BuildParams):
     actors = []
-    for actor_file in (params.mod / params.content / "Actor" / "ActorInfo").glob(
-        "*.info.yml"
+    for actor_file in (params.out / params.content / "Actor" / "ActorInfo").glob(
+        "*.info"
     ):
-        actors.append(oead.byml.from_text(actor_file.read_text(encoding="utf-8")))
+        actors.append(oead.byml.from_binary(actor_file.read_bytes()))
+        actor_file.unlink()
     hashes = oead.byml.Array(
         [
             oead.S32(crc) if crc < 2147483648 else oead.U32(crc)
@@ -537,7 +538,7 @@ def build_mod(args):
         f
         for f in mod.rglob("**/*")
         if f.is_file()
-        and "ActorInfo" not in f.parts
+        # and "ActorInfo" not in f.parts
         and not str(f.relative_to(mod)).startswith(".")
     }
     other_files = {f for f in files if f.suffix not in {".yml", ".msyt"}}
@@ -557,10 +558,6 @@ def build_mod(args):
             rvs.update(r)
 
     if (mod / content).exists():
-        print("Building actor info...")
-        if (mod / content / "Actor" / "ActorInfo").is_dir():
-            _build_actorinfo(params)
-
         msg_dirs = {
             d
             for d in mod.glob(f"{content}/Pack/Bootup_*.pack")
@@ -590,6 +587,10 @@ def build_mod(args):
     if (params.out / main_aoc / "Map" / "MainField").exists():
         (params.out / main_aoc / "Pack").mkdir(parents=True, exist_ok=True)
         (params.out / main_aoc / "Pack" / "AocMainField.pack").write_bytes(b"")
+
+    if (mod / content / "Actor" / "ActorInfo").is_dir():
+        print("Building actor info...")
+        _build_actorinfo(params)
 
     actors = {f for f in (out / content / "Actor" / "ActorLink").glob("*.bxml")}
     if actors:
