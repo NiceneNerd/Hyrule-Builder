@@ -37,6 +37,7 @@ setup(
         'oead>=0.11.2',
         'pymsyt>=0.1.4',
         'rstb>=1.1.3',
-        'xxhash>=1.3.0'
+        'xxhash>=1.3.0',
+        'botw_havok>=0.3.17'
     ]
 )
