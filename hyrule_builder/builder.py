@@ -16,6 +16,7 @@ import oead.aamp
 from oead.yaz0 import compress
 import pymsyt
 from rstb import ResourceSizeTable, SizeCalculator
+from .hyrule_builder import ModBuilderR
 
 from . import (
     AAMP_EXTS,
@@ -693,6 +694,32 @@ class ModBuilder:
 
 
 def build_mod(args):
-    builder = ModBuilder(args)
+    mod = Path(args.directory)
+    meta = {}
+    if (mod / "config.yml").exists():
+        config = oead.byml.from_text((mod / "config.yml").read_text("utf8"))
+        if "Flags" in config:
+            for flag in config["Flags"]:
+                setattr(args, flag.replace("-", "_"), True)
+        if "Options" in config:
+            for key, val in config["Options"].items():
+                setattr(args, key.replace("-", "_"), val)
+        if "Meta" in config:
+            for key, val in config["Meta"].items():
+                meta[key] = val
+    builder = ModBuilderR(
+        input=str(mod),
+        output=args.output or str(mod / "build"),
+        meta=meta,
+        be=args.be,
+        guess=not args.no_guess,
+        verbose=args.verbose,
+        titles=args.title_actors or "",
+        warn=not args.no_warn,
+        strict=args.hard_warn,
+        no_rstb=args.no_rstb,
+        single=args.single,
+    )
     builder.build()
-    print("Mod built successfully")
+    # builder = ModBuilder(args)
+    # builder.build()
