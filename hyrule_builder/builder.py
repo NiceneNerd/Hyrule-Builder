@@ -170,7 +170,7 @@ class ModBuilder:
     def load_rstb(self, file: Path = None) -> ResourceSizeTable:
         table = ResourceSizeTable(b"", be=self.be)
         if not file:
-            ver = "wiiu" if be else "switch"
+            ver = "wiiu" if self.be else "switch"
             file = EXEC_DIR / "data" / ver / "rstb.json"
         ref_contents = json.loads(file.read_text(), encoding="utf-8")
 
@@ -225,14 +225,16 @@ class ModBuilder:
         return {}
 
     def _build_byml(self, f: Path) -> bytes:
-        return bytes(
-            oead.byml.to_binary(
-                oead.byml.from_text(f.read_text("utf-8")), big_endian=self.be
-            )
-        )
+        in_data = oead.byml.from_text(f.read_text("utf-8"))
+        out_data = bytes(oead.byml.to_binary(in_data, big_endian=self.be))
+        del in_data
+        return out_data
 
     def _build_aamp(self, f: Path) -> bytes:
-        return bytes(oead.aamp.ParameterIO.from_text(f.read_text("utf-8")).to_binary())
+        pio = oead.aamp.ParameterIO.from_text(f.read_text("utf-8"))
+        data = pio.to_binary()
+        del pio
+        return bytes(data)
 
     def _build_yml(self, f: Path):
         rv = {}
@@ -248,6 +250,9 @@ class ModBuilder:
                 data = self._build_byml(f)
             elif ext in AAMP_EXTS:
                 data = self._build_aamp(f)
+            else:
+                self.warning(f"Unknown YAML file {f.name}")
+                return {}
             t.write_bytes(data if not t.suffix.startswith(".s") else compress(data))
             canon = get_canon_name(t.relative_to(self.out))
             if self.table.is_file_modded(canon, data) and _should_rstb(t):
@@ -260,7 +265,7 @@ class ModBuilder:
             print(f"Built {f.relative_to(self.mod).as_posix()}")
         return rv
 
-    def _parse_actor_link(self, link: Path) -> {}:
+    def _parse_actor_link(self, link: Path) -> dict:
         actor_name = link.stem
         if link.suffix == ".yml":
             actor = oead.aamp.ParameterIO.from_text(link.read_text("utf-8"))
@@ -528,7 +533,7 @@ class ModBuilder:
         f: Path
         rvs = {}
         if not self.single:
-            p = Pool()
+            p = Pool(maxtasksperchild=256)
 
         print("Copying miscellaneous files...")
         if self.single or len(other_files) < 2:
