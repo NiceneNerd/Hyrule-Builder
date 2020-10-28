@@ -694,7 +694,7 @@ class ModBuilder:
 
 
 def build_mod(args):
-    mod = Path(args.directory)
+    mod = Path(args.directory).resolve()
     meta = {}
     if (mod / "config.yml").exists():
         config = oead.byml.from_text((mod / "config.yml").read_text("utf8"))
@@ -707,19 +707,26 @@ def build_mod(args):
         if "Meta" in config:
             for key, val in config["Meta"].items():
                 meta[key] = val
-    builder = ModBuilderR(
-        input=str(mod),
-        output=args.output or str(mod / "build"),
-        meta=meta,
-        be=args.be,
-        guess=not args.no_guess,
-        verbose=args.verbose,
-        titles=args.title_actors or "",
-        warn=not args.no_warn,
-        strict=args.hard_warn,
-        no_rstb=args.no_rstb,
-        single=args.single,
-    )
+    try:
+        builder = ModBuilderR(
+            input=str(mod),
+            output=args.output or str(mod / "build"),
+            meta=meta,
+            be=args.be,
+            guess=not args.no_guess,
+            verbose=args.verbose,
+            titles=args.title_actors or "",
+            warn=not args.no_warn,
+            strict=args.hard_warn,
+            no_rstb=args.no_rstb,
+            single=args.single,
+        )
+    except ValueError:
+        print(
+            "The specified directory does not appear to have a valid folder structure."
+        )
+        print("Run `hyrule_builder build --help` for more information.")
+        return
     builder.build()
     # builder = ModBuilder(args)
     # builder.build()

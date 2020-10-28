@@ -10,6 +10,9 @@ crate-type = ["cdylib"]
 
 [dependencies]
 botw-utils = "0.2.0"
+# chrono = "0.4"
+glob = "0.3.0"
+path_macro = "1.0.0"
 
 [dependencies.pyo3]
 version = "0.12.3"
