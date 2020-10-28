@@ -16,7 +16,6 @@ import oead.aamp
 from oead.yaz0 import compress
 import pymsyt
 from rstb import ResourceSizeTable, SizeCalculator
-from .hyrule_builder import ModBuilderR
 from .hyrule_builder import build_mod as build_mod_rust
 
 from . import (
