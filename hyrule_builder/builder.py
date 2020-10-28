@@ -17,6 +17,7 @@ from oead.yaz0 import compress
 import pymsyt
 from rstb import ResourceSizeTable, SizeCalculator
 from .hyrule_builder import ModBuilderR
+from .hyrule_builder import build_mod as build_mod_rust
 
 from . import (
     AAMP_EXTS,
@@ -707,26 +708,27 @@ def build_mod(args):
         if "Meta" in config:
             for key, val in config["Meta"].items():
                 meta[key] = val
-    try:
-        builder = ModBuilderR(
-            input=str(mod),
-            output=args.output or str(mod / "build"),
-            meta=meta,
-            be=args.be,
-            guess=not args.no_guess,
-            verbose=args.verbose,
-            titles=args.title_actors or "",
-            warn=not args.no_warn,
-            strict=args.hard_warn,
-            no_rstb=args.no_rstb,
-            single=args.single,
-        )
-    except ValueError:
-        print(
-            "The specified directory does not appear to have a valid folder structure."
-        )
-        print("Run `hyrule_builder build --help` for more information.")
-        return
-    builder.build()
+    build_mod_rust(args, meta)
+    # try:
+    #     builder = ModBuilderR(
+    #         input=str(mod),
+    #         output=args.output or str(mod / "build"),
+    #         meta=meta,
+    #         be=args.be,
+    #         guess=not args.no_guess,
+    #         verbose=args.verbose,
+    #         titles=args.title_actors or "",
+    #         warn=not args.no_warn,
+    #         strict=args.hard_warn,
+    #         no_rstb=args.no_rstb,
+    #         single=args.single,
+    #     )
+    # except ValueError:
+    #     print(
+    #         "The specified directory does not appear to have a valid folder structure."
+    #     )
+    #     print("Run `hyrule_builder build --help` for more information.")
+    #     return
+    # builder.build()
     # builder = ModBuilder(args)
     # builder.build()
