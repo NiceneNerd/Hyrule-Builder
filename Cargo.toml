@@ -9,9 +9,11 @@ name = "hyrule_builder"
 crate-type = ["cdylib"]
 
 [dependencies]
+aamp = "0.1.1"
 botw-utils = "0.2.0"
 chrono = "0.4"
 glob = "0.3.0"
+sarc = "1.1.2"
 path_macro = "1.0.0"
 
 [dependencies.pyo3]

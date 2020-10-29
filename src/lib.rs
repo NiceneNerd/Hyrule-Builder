@@ -1,13 +1,14 @@
 use botw_utils::hashes::{Platform, StockHashTable};
-use chrono::prelude::*;
+// use chrono::prelude::*;
 use glob::glob;
 use path_macro::path;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3::wrap_pyfunction;
+use sarc::{Endian, SarcEntry, SarcFile};
 use std::collections::{HashMap, HashSet};
-use std::fs::{metadata, read_to_string, write};
-use std::path::{Path, PathBuf};
+use std::fs::{metadata, read, read_to_string, write, File};
+use std::path::PathBuf;
 
 #[pymodule]
 pub fn hyrule_builder(_: Python, m: &PyModule) -> PyResult<()> {
@@ -39,12 +40,10 @@ pub struct BuildArgs {
     title_actors: String,
 }
 
-struct Actor<'a> {
-    name: &'a str,
-    name_jpn: &'a str,
-    priority: &'a str,
-    aiprogram: String,
-    aischedule: String,
+#[derive(Debug)]
+struct Actor {
+    name: String,
+    pack: SarcFile,
 }
 
 #[pyfunction]
@@ -106,6 +105,7 @@ pub fn build_mod(args: BuildArgs, meta: &PyDict) -> PyResult<()> {
             }),
         ),
         file_times,
+        actors: vec![],
     };
     builder.build()?;
     Ok(())
@@ -128,6 +128,7 @@ pub struct ModBuilder {
     single: bool,
     no_rstb: bool,
     file_times: HashMap<PathBuf, u64>,
+    actors: Vec<Actor>,
 }
 
 impl ModBuilder {
@@ -141,6 +142,233 @@ impl ModBuilder {
                 .collect::<String>(),
         )
         .unwrap();
+        Ok(())
+    }
+
+    fn parse_pio(&self, file: &PathBuf) -> PyResult<aamp::ParameterIO> {
+        let mut file = File::open(file)?;
+        if let Ok(pio) = aamp::ParameterIO::from_binary(&mut file) {
+            Ok(pio)
+        } else {
+            Err(pyo3::exceptions::PyValueError::new_err(
+                "AAMP file {:?} could not be parsed",
+            ))
+        }
+    }
+
+    fn parse_actor(&mut self, link: &PathBuf) -> PyResult<()> {
+        let yml = read_to_string(link)?;
+        let pio: aamp::ParameterIO = aamp::ParameterIO::from_text(&yml).unwrap();
+        let actor_dir = path!(self.input / self.content / "Actor");
+
+        let mut files: Vec<SarcEntry> = vec![];
+        let add_param_file = |path: &str, v: &str| -> PyResult<SarcEntry> {
+            let pio_path = path.replace("{}", v);
+            Ok(SarcEntry {
+                data: self
+                    .parse_pio(&path!(actor_dir / &pio_path))?
+                    .to_binary()
+                    .unwrap(),
+                name: Some(format!("Actor/{}", pio_path)),
+            })
+        };
+
+        for (k, v) in pio.object("LinkTarget").unwrap().params().iter() {
+            if let aamp::Parameter::StringRef(v) = v {
+                if v == "Dummy" {
+                    continue;
+                }
+                match k {
+                    3293308145 => files.push(add_param_file("AIProgram/{}.baiprog", v)?),
+                    1241489578 => files.push(add_param_file("AnimationInfo/{}.baniminfo", v)?),
+                    1767976113 => files.push(add_param_file("Awareness/{}.bawareness", v)?),
+                    713857735 => files.push(add_param_file("BoneControl/{}.bbonectrl", v)?),
+                    2863165669 => files.push(add_param_file("Chemical/{}.bchemical", v)?),
+                    2307148887 => files.push(add_param_file("DamageParam/{}.bdmgparam", v)?),
+                    2189637974 => files.push(add_param_file("DropTable/{}.bdrop", v)?),
+                    619158934 => files.push(add_param_file("GeneralParamList/{}.bgparamlist", v)?),
+                    414149463 => files.push(add_param_file("LifeCondition/{}.blifecondition", v)?),
+                    1096753192 => files.push(add_param_file("LOD/{}.blod", v)?),
+                    3086518481 => files.push(add_param_file("ModelList/{}.bmodellist", v)?),
+                    1292038778 => files.push(add_param_file("RagdollBlendWeight/{}.brgbw", v)?),
+                    1589643025 => files.push(add_param_file("Recipe/{}.brecipe", v)?),
+                    2994379201 => files.push(add_param_file("ShopData/{}.bshop", v)?),
+                    3926186935 => files.push(add_param_file("UMii/{}.bumii", v)?),
+                    110127898 => {
+                        // ASUser
+                        let aslist = self
+                            .parse_pio(&path!(actor_dir / "ASList" / format!("{}.baslist", v)))?;
+                        for anim in aslist.list("ASDefines").unwrap().objects.values() {
+                            if let aamp::Parameter::String64(filename) =
+                                anim.param("Filename").unwrap()
+                            {
+                                if filename == "Dummy" {
+                                    continue;
+                                }
+                                let as_path = format!("AS/{}.bas", filename);
+                                files.push(SarcEntry {
+                                    data: self
+                                        .parse_pio(&path!(actor_dir / &as_path))?
+                                        .to_binary()
+                                        .unwrap(),
+                                    name: Some(format!("Actor/{}", &as_path)),
+                                });
+                            }
+                        }
+                        files.push(SarcEntry {
+                            data: aslist.to_binary().unwrap(),
+                            name: Some(format!("Actor/ASList/{}.baslist", v)),
+                        });
+                    }
+                    1086735552 => {
+                        // AttentionUser
+                        let attcllist = self.parse_pio(&path!(
+                            actor_dir / "AttClientList" / format!("{}.batcllist", v)
+                        ))?;
+                        for atcl in attcllist.list("AttClients").unwrap().objects.values() {
+                            if let aamp::Parameter::String64(filename) =
+                                atcl.param("FileName").unwrap()
+                            {
+                                if filename == "Dummy" {
+                                    continue;
+                                }
+                                let atcl_path = format!("AttClient/{}.batcl", filename);
+                                files.push(SarcEntry {
+                                    data: self
+                                        .parse_pio(&path!(actor_dir / &atcl_path))?
+                                        .to_binary()
+                                        .unwrap(),
+                                    name: Some(format!("Actor/{}", &atcl_path)),
+                                });
+                            }
+                        }
+                        files.push(SarcEntry {
+                            data: attcllist.to_binary().unwrap(),
+                            name: Some(format!("Actor/AttClientList/{}.batcllist", v)),
+                        });
+                    }
+                    4022948047 => {
+                        // RgConfigListUser
+                        let rglist = self.parse_pio(&path!(
+                            actor_dir / "RagdollConfigList" / format!("{}.brgconfiglist", v)
+                        ))?;
+                        for impulse in rglist.list("ImpulseParamList").unwrap().objects.values() {
+                            if let aamp::Parameter::String64(filename) =
+                                impulse.param("FileName").unwrap()
+                            {
+                                if filename == "Dummy" {
+                                    continue;
+                                }
+                                let impulse_path = format!("RagdollConfig/{}.brgconfig", filename);
+                                files.push(SarcEntry {
+                                    data: self
+                                        .parse_pio(&path!(actor_dir / &impulse_path))?
+                                        .to_binary()
+                                        .unwrap(),
+                                    name: Some(format!("Actor/{}", &impulse_path)),
+                                });
+                            }
+                        }
+                        files.push(SarcEntry {
+                            data: rglist.to_binary().unwrap(),
+                            name: Some(format!("Actor/RagdollConfigList/{}.brgconfiglist", v)),
+                        });
+                    }
+                    2366604039 => {
+                        // PhysicsUser
+                        let physics_source = path!(self.input / self.content / "Physics");
+                        let physics = self
+                            .parse_pio(&path!(actor_dir / "Physics" / format!("{}.bphysics", v)))?;
+                        let types = &physics.list("ParamSet").unwrap().objects[1258832850];
+                        if let aamp::Parameter::Bool(use_ragdoll) =
+                            types.param("use_ragdoll").unwrap()
+                        {
+                            if *use_ragdoll {
+                                if let aamp::Parameter::String256(rg_path) = physics
+                                    .list("ParamSet")
+                                    .unwrap()
+                                    .object("Ragdoll")
+                                    .unwrap()
+                                    .param("ragdoll_setup_file_path")
+                                    .unwrap()
+                                {
+                                    files.push(SarcEntry {
+                                        name: Some(format!("Physics/Ragdoll/{}", rg_path)),
+                                        data: read(path!(physics_source / "Ragdoll" / rg_path))?,
+                                    });
+                                }
+                            }
+                        }
+                        if let aamp::Parameter::Bool(use_support) =
+                            types.param("use_support_bone").unwrap()
+                        {
+                            if *use_support {
+                                if let aamp::Parameter::String256(support_path) = physics
+                                    .list("ParamSet")
+                                    .unwrap()
+                                    .object("SupportBone")
+                                    .unwrap()
+                                    .param("support_bone_setup_file_path")
+                                    .unwrap()
+                                {
+                                    files.push(SarcEntry {
+                                        name: Some(format!("Physics/SupportBone/{}", support_path)),
+                                        data: read(path!(
+                                            physics_source / "SupportBone" / support_path
+                                        ))?,
+                                    });
+                                }
+                            }
+                        }
+                        if let aamp::Parameter::Bool(use_cloth) = types.param("use_cloth").unwrap()
+                        {
+                            if *use_cloth {
+                                if let aamp::Parameter::String256(cloth_path) = physics
+                                    .list("ParamSet")
+                                    .unwrap()
+                                    .object("ClothHeader")
+                                    .unwrap()
+                                    .param("cloth_setup_file_path")
+                                    .unwrap()
+                                {
+                                    files.push(SarcEntry {
+                                        name: Some(format!("Physics/Cloth/{}", cloth_path)),
+                                        data: read(path!(physics_source / "Cloth" / cloth_path))?,
+                                    });
+                                }
+                            }
+                        }
+                        if let aamp::Parameter::Int(rigid_num) =
+                            types.param("use_rigid_body_set_num").unwrap()
+                        {
+                            if *rigid_num > 0 {
+                                for rigid in physics
+                                    .list("ParamSet")
+                                    .unwrap()
+                                    .list("RigidBodySet")
+                                    .unwrap()
+                                    .lists
+                                    .values()
+                                {}
+                            }
+                        }
+                    }
+                    _ => continue,
+                };
+            }
+        }
+
+        self.actors.push(Actor {
+            name: String::from(link.file_name().unwrap().to_string_lossy()),
+            pack: SarcFile {
+                byte_order: if self.be {
+                    sarc::Endian::Big
+                } else {
+                    sarc::Endian::Little
+                },
+                files,
+            },
+        });
         Ok(())
     }
 
@@ -193,7 +421,6 @@ impl ModBuilder {
             }
             other_files.push(file.to_owned());
         }
-        println!("{:?}", updated_files);
 
         let time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
