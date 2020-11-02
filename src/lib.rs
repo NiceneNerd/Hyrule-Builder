@@ -11,9 +11,10 @@ use pyo3::types::PyDict;
 use pyo3::wrap_pyfunction;
 use rayon::prelude::*;
 use sarc::{SarcEntry, SarcFile};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::error::Error;
 use std::fs::{metadata, read, read_to_string, write, File};
+use std::io::Cursor;
 use std::path::PathBuf;
 
 type BoxError = Box<dyn Error + Send + Sync>;
@@ -65,8 +66,30 @@ pub struct BuildArgs {
 
 #[derive(Debug)]
 struct Actor {
-    name: String,
-    pack: SarcFile,
+    pub name: String,
+    pub pack: SarcFile,
+}
+
+impl Actor {
+    fn get_info(&self) -> Byml {
+        let info: BTreeMap<String, Byml> = BTreeMap::new();
+        Byml::Hash(info)
+    }
+
+    fn get_params(&self, ext: &str) -> Option<ParameterIO> {
+        if let Some(file) = self
+            .pack
+            .files
+            .iter()
+            .find(|f| f.name.is_some() && f.name.as_ref().unwrap().ends_with(ext))
+        {
+            let mut reader = Cursor::new(&file.data);
+            if let Ok(pio) = ParameterIO::from_binary(&mut reader) {
+                return Some(pio);
+            }
+        }
+        None
+    }
 }
 
 #[pyfunction]
@@ -433,7 +456,9 @@ impl ModBuilder {
             }
         }
 
-        if file_map.iter().any(|(_, v)| self.fresh_files.contains(&v)) {
+        if self.fresh_files.contains(&link)
+            || file_map.iter().any(|(_, v)| self.fresh_files.contains(&v))
+        {
             Ok(Some(Actor {
                 name: link
                     .file_stem()
@@ -489,14 +514,12 @@ impl ModBuilder {
             .filter_map(|x| {
                 if let Ok(path) = x {
                     if path.is_file() {
-                        if let Ok(path) = path.strip_prefix(&self.input) {
-                            if !path
-                                .components()
-                                .map(|c| c.as_os_str().to_string_lossy())
-                                .any(|c| c == "build" || c.starts_with('.'))
-                            {
-                                return Some(path.to_owned());
-                            }
+                        if !path
+                            .components()
+                            .map(|c| c.as_os_str().to_string_lossy())
+                            .any(|c| c == "build" || c.starts_with('.'))
+                        {
+                            return Some(path.to_owned());
                         }
                     }
                 }
@@ -504,10 +527,7 @@ impl ModBuilder {
             })
             .collect();
         for file in &self.all_files {
-            let modified = metadata(path!(self.input / file))
-                .unwrap()
-                .modified()
-                .unwrap();
+            let modified = metadata(&file).unwrap().modified().unwrap();
             if !self.file_times.contains_key(file)
                 || modified
                     .duration_since(
@@ -530,7 +550,7 @@ impl ModBuilder {
             self.other_files.push(file.to_owned());
         }
 
-        println!("{:?}", self.yml_files.len());
+        println!("{:?}", self.fresh_files.len());
         println!("Loading actors to build...");
         self.actors.extend(
             glob(
