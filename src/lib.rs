@@ -13,12 +13,73 @@ use rayon::prelude::*;
 use sarc::{SarcEntry, SarcFile};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::error::Error;
-use std::fs::{metadata, read, read_to_string, write, File};
+use std::fs::{copy, create_dir_all, metadata, read, read_to_string, write, File};
 use std::io::Cursor;
 use std::path::PathBuf;
 
 type BoxError = Box<dyn Error + Send + Sync>;
 type GeneralResult<T> = Result<T, BoxError>;
+
+static TITLE_ACTORS: [&str; 58] = [
+    "AncientArrow",
+    "Animal_Insect_A",
+    "Animal_Insect_B",
+    "Animal_Insect_F",
+    "Animal_Insect_H",
+    "Animal_Insect_M",
+    "Animal_Insect_S",
+    "Animal_Insect_X",
+    "Armor_Default_Extra_00",
+    "Armor_Default_Extra_01",
+    "BombArrow_A",
+    "BrightArrow",
+    "BrightArrowTP",
+    "CarryBox",
+    "DemoXLinkActor",
+    "Dm_Npc_Gerudo_HeroSoul_Kago",
+    "Dm_Npc_Goron_HeroSoul_Kago",
+    "Dm_Npc_RevivalFairy",
+    "Dm_Npc_Rito_HeroSoul_Kago",
+    "Dm_Npc_Zora_HeroSoul_Kago",
+    "ElectricArrow",
+    "ElectricWaterBall",
+    "EventCameraRumble",
+    "EventControllerRumble",
+    "EventMessageTransmitter1",
+    "EventSystemActor",
+    "Explode",
+    "Fader",
+    "FireArrow",
+    "FireRodLv1Fire",
+    "FireRodLv2Fire",
+    "FireRodLv2FireChild",
+    "GameROMPlayer",
+    "IceArrow",
+    "IceRodLv1Ice",
+    "IceRodLv2Ice",
+    "Item_Conductor",
+    "Item_Magnetglove",
+    "Item_Material_01",
+    "Item_Material_03",
+    "Item_Material_07",
+    "Item_Ore_F",
+    "NormalArrow",
+    "Obj_IceMakerBlock",
+    "Obj_SupportApp_Wind",
+    "PlayerShockWave",
+    "PlayerStole2",
+    "RemoteBomb",
+    "RemoteBomb2",
+    "RemoteBombCube",
+    "RemoteBombCube2",
+    "SceneSoundCtrlTag",
+    "SoundTriggerTag",
+    "TerrainCalcCenterTag",
+    "ThunderRodLv1Thunder",
+    "ThunderRodLv2Thunder",
+    "ThunderRodLv2ThunderChild",
+    "WakeBoardRope",
+];
 
 #[derive(Debug, Clone)]
 struct AampKeyError(String);
@@ -565,7 +626,40 @@ impl ModBuilder {
             .filter_map(|f| self.parse_actor(f).transpose())
             .collect::<GeneralResult<Vec<Actor>>>()?,
         );
-        println!("{:?}", self.actors);
+
+        self.other_files
+            .par_iter()
+            .map(|f| {
+                if self.fresh_files.contains(f) {
+                    let out = path!(&self.output / f.strip_prefix(&self.input).unwrap());
+                    create_dir_all(out.parent().unwrap())?;
+                    copy(f, out)
+                        .map_err(|e| Box::from(format!("{:?} at {:?}", e, f)))
+                        .map(|_| ())
+                } else {
+                    Ok(())
+                }
+            })
+            .collect::<GeneralResult<()>>()?;
+
+        self.actors
+            .par_iter()
+            .map(|a| {
+                if !TITLE_ACTORS.contains(&a.name.as_str()) {
+                    let out = path!(
+                        &self.output
+                            / &self.content
+                            / "Actor"
+                            / "Pack"
+                            / format!("{}.sbactorpack", &a.name)
+                    );
+                    &a.pack.write_to_yaz0_file(&out).map_err(|e| {
+                        Box::from(format!("Error {:?} writing actor pack {}", e, &a.name))
+                    })?;
+                }
+                Ok(())
+            })
+            .collect::<GeneralResult<()>>()?;
 
         let time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
