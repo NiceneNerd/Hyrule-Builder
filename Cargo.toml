@@ -10,7 +10,8 @@ crate-type = ["cdylib"]
 
 [dependencies]
 aamp = "0.1.1"
-byml = "0.1.0"
+# byml = "0.1.1"
+byml = { version = "0.1.1", path = "../byml-rust" }
 botw-utils = "0.2.0"
 chrono = "0.4"
 crc = "^1.0.0"
