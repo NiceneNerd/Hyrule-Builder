@@ -3,6 +3,7 @@ use botw_utils::hashes::{Platform, StockHashTable};
 // use chrono::prelude::*;
 use aamp::*;
 use byml::Byml;
+use crc::crc32;;
 use glob::glob;
 use path_macro::path;
 use pyo3::exceptions::*;
@@ -11,7 +12,7 @@ use pyo3::types::PyDict;
 use pyo3::wrap_pyfunction;
 use rayon::prelude::*;
 use sarc::{SarcEntry, SarcFile};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::error::Error;
 use std::fs::{copy, create_dir_all, metadata, read, read_to_string, write, File};
 use std::io::Cursor;
@@ -134,9 +135,9 @@ struct Actor {
 }
 
 impl Actor {
-    fn get_info(&self) -> Byml {
+    fn get_info(&self) -> BTreeMap<String, Byml> {
         let info: BTreeMap<String, Byml> = BTreeMap::new();
-        Byml::Hash(info)
+        info
     }
 
     fn get_params(&self, ext: &str) -> Option<ParameterIO> {
@@ -416,19 +417,21 @@ impl ModBuilder {
                         ))?;
                         let types = &physics
                             .list("ParamSet")
-                            .ok_or(AampKeyError("ParamSet".to_owned()))?
+                            .ok_or_else(|| AampKeyError("ParamSet".to_owned()))?
                             .objects
                             .get(&1258832850u32)
-                            .ok_or(AampKeyError("1258832850".to_owned()))?;
+                            .ok_or_else(|| AampKeyError("1258832850".to_owned()))?;
                         if let Parameter::Bool(use_ragdoll) = types.param("use_ragdoll").unwrap() {
                             if *use_ragdoll {
                                 if let Parameter::String256(rg_path) = physics
                                     .list("ParamSet")
-                                    .ok_or(AampKeyError("ParamSet".to_owned()))?
+                                    .ok_or_else(|| AampKeyError("ParamSet".to_owned()))?
                                     .object("Ragdoll")
-                                    .ok_or(AampKeyError("Ragdoll".to_owned()))?
+                                    .ok_or_else(|| AampKeyError("Ragdoll".to_owned()))?
                                     .param("ragdoll_setup_file_path")
-                                    .ok_or(AampKeyError("ragdoll_setup_file_path".to_owned()))?
+                                    .ok_or_else(|| {
+                                        AampKeyError("ragdoll_setup_file_path".to_owned())
+                                    })?
                                 {
                                     file_map.insert(
                                         format!("Physics/Ragdoll/{}", &rg_path),
@@ -443,13 +446,13 @@ impl ModBuilder {
                             if *use_support {
                                 if let Parameter::String256(support_path) = physics
                                     .list("ParamSet")
-                                    .ok_or(AampKeyError("ParamSet".to_owned()))?
+                                    .ok_or_else(|| AampKeyError("ParamSet".to_owned()))?
                                     .object("SupportBone")
-                                    .ok_or(AampKeyError("SupportBone".to_owned()))?
+                                    .ok_or_else(|| AampKeyError("SupportBone".to_owned()))?
                                     .param("support_bone_setup_file_path")
-                                    .ok_or(AampKeyError(
-                                        "support_bone_setup_file_path".to_owned(),
-                                    ))?
+                                    .ok_or_else(|| {
+                                        AampKeyError("support_bone_setup_file_path".to_owned())
+                                    })?
                                 {
                                     file_map.insert(
                                         format!("Physics/SupportBone/{}", &support_path),
@@ -462,13 +465,15 @@ impl ModBuilder {
                             if *use_cloth {
                                 if let Parameter::String256(cloth_path) = physics
                                     .list("ParamSet")
-                                    .ok_or(AampKeyError("ParamSet".to_owned()))?
+                                    .ok_or_else(|| AampKeyError("ParamSet".to_owned()))?
                                     .list("Cloth")
-                                    .ok_or(AampKeyError("Cloth".to_owned()))?
+                                    .ok_or_else(|| AampKeyError("Cloth".to_owned()))?
                                     .object("ClothHeader")
-                                    .ok_or(AampKeyError("ClothHeader".to_owned()))?
+                                    .ok_or_else(|| AampKeyError("ClothHeader".to_owned()))?
                                     .param("cloth_setup_file_path")
-                                    .ok_or(AampKeyError("cloth_setup_file_path".to_owned()))?
+                                    .ok_or_else(|| {
+                                        AampKeyError("cloth_setup_file_path".to_owned())
+                                    })?
                                 {
                                     file_map.insert(
                                         format!("Physics/Cloth/{}", &cloth_path),
@@ -483,16 +488,16 @@ impl ModBuilder {
                             if *rigid_num > 0 {
                                 for rigid in physics
                                     .list("ParamSet")
-                                    .ok_or(AampKeyError("ParamSet".to_owned()))?
+                                    .ok_or_else(|| AampKeyError("ParamSet".to_owned()))?
                                     .list("RigidBodySet")
-                                    .ok_or(AampKeyError("RigidBodySet".to_owned()))?
+                                    .ok_or_else(|| AampKeyError("RigidBodySet".to_owned()))?
                                     .lists
                                     .values()
                                 {
                                     if let Some(setup_path_param) = rigid
                                         .objects
                                         .get(&4288596824)
-                                        .ok_or(AampKeyError("4288596824".to_owned()))?
+                                        .ok_or_else(|| AampKeyError("4288596824".to_owned()))?
                                         .param("setup_file_path")
                                     {
                                         if let Parameter::String256(setup_path) = setup_path_param {
@@ -576,14 +581,13 @@ impl ModBuilder {
             .expect("Weird, a glob error")
             .filter_map(|x| {
                 if let Ok(path) = x {
-                    if path.is_file() {
-                        if !path
+                    if path.is_file()
+                        && !path
                             .components()
                             .map(|c| c.as_os_str().to_string_lossy())
                             .any(|c| c == "build" || c.starts_with('.'))
-                        {
-                            return Some(path.to_owned());
-                        }
+                    {
+                        return Some(path);
                     }
                 }
                 None
@@ -647,8 +651,9 @@ impl ModBuilder {
 
         let actorinfo_dir = path!(&self.input / &self.content / "Actor" / "ActorInfo");
         if actorinfo_dir.exists() {
-            let modded_actors: Vec<String> = self.actors.iter().map(|a| a.name).collect();
-            let actorinfo: BTreeMap<String, Byml> = BTreeMap::new();
+            let modded_actors: Vec<String> =
+                self.actors.iter().map(|a| a.name.to_owned()).collect();
+            let mut actorinfo: BTreeMap<String, Byml> = BTreeMap::new();
             let actorlist: Arc<Mutex<Vec<Byml>>> = Arc::new(Mutex::new(Vec::new()));
             glob(&path!(actorinfo_dir / "*.yml").to_string_lossy())
                 .expect("Weird, a glob error")
@@ -656,27 +661,36 @@ impl ModBuilder {
                 .collect::<Vec<PathBuf>>()
                 .par_iter()
                 .map(|f| -> GeneralResult<()> {
-                    let mut byml = Byml::from_binary(&read(&f)?)
-                        .map_err(|e| Box::<AnyError>::from(format!("{}", e)))?;
-                    let mut info = byml.as_hash()?.clone();
-                    let actor_name = byml.as_hash()?["name"].as_string()?;
-                    if modded_actors.contains(actor_name) {
-                        for (k, v) in self
-                            .actors
-                            .iter()
-                            .find(|a| &a.name == actor_name)
-                            .expect("Weird")
-                            .get_info()
-                            .as_hash()?
-                            .iter()
-                        {
-                            info.insert(k.to_string(), v.clone());
+                    if let Byml::Hash(mut info) = Byml::from_binary(&read(&f)?)
+                        .map_err(|e| Box::<AnyError>::from(format!("{}", e)))?
+                    {
+                        let actor_name = info["name"].as_string()?;
+                        if modded_actors.contains(actor_name) {
+                            info.extend(
+                                self.actors
+                                    .iter()
+                                    .find(|a| &a.name == actor_name)
+                                    .expect("Weird")
+                                    .get_info(),
+                            )
                         }
+                        actorlist.lock().unwrap().push(Byml::Hash(info));
                     }
-                    actorlist.lock().unwrap().push(Byml::Hash(info));
+                    // let mut info: BTreeMap<String, Byml> = std::mem::take(&mut byml);
                     Ok(())
                 })
                 .collect::<GeneralResult<()>>()?;
+            let mut actorlist = actorlist.lock().unwrap().to_owned();
+            let mut hashlist: Arc<Mutex<BTreeSet<u32>>> = Arc::new(Mutex::new(BTreeSet::new()));
+            actorlist.sort_by_key(|a| {
+                let name = a.as_hash().unwrap()["name"].as_string().unwrap();
+                let hash = crc32::checksum_ieee(name.as_bytes());
+                if hash < 2147483648 {
+                    
+                }
+                name.clone()
+            });
+            actorinfo.insert("Actors".to_owned(), Byml::Array(actorlist));
         }
 
         println!("Building actors...");
@@ -751,5 +765,5 @@ fn write_yaz0_sarc_to_file<P: AsRef<Path>>(sarc: &SarcFile, path: P) -> GeneralR
     sarc.write(&mut temp)?;
     writer
         .compress_and_write(&temp, yaz0::CompressionLevel::Lookahead { quality: 10 })
-        .map_err(|e| Box::from(e))
+        .map_err(Box::from)
 }
