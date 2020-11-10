@@ -15,10 +15,11 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::error::Error;
 use std::fs::{copy, create_dir_all, metadata, read, read_to_string, write, File};
 use std::io::Cursor;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use yaz0::Yaz0Writer;
 
-type BoxError = Box<dyn Error + Send + Sync>;
-type GeneralResult<T> = Result<T, BoxError>;
+type AnyError = dyn Error + Send + Sync;
+type GeneralResult<T> = Result<T, Box<AnyError>>;
 
 static TITLE_ACTORS: [&str; 58] = [
     "AncientArrow",
@@ -571,7 +572,7 @@ impl ModBuilder {
 
     fn build(&mut self) -> GeneralResult<()> {
         self.all_files = glob(&path!(self.input / "**" / "*.*").to_string_lossy())
-            .unwrap()
+            .expect("Weird, a glob error")
             .filter_map(|x| {
                 if let Ok(path) = x {
                     if path.is_file() {
@@ -618,7 +619,7 @@ impl ModBuilder {
                 &path!(self.input / self.content / "Actor" / "ActorLink" / "*.bxml.yml")
                     .to_string_lossy(),
             )
-            .unwrap()
+            .expect("Weird, a glob error")
             .filter_map(|f| f.ok())
             .collect::<Vec<PathBuf>>()
             .par_iter()
@@ -627,6 +628,7 @@ impl ModBuilder {
             .collect::<GeneralResult<Vec<Actor>>>()?,
         );
 
+        println!("Copying miscellaneous files...");
         self.other_files
             .par_iter()
             .map(|f| {
@@ -642,24 +644,57 @@ impl ModBuilder {
             })
             .collect::<GeneralResult<()>>()?;
 
+        println!("Building actors...");
         self.actors
             .par_iter()
             .map(|a| {
-                if !TITLE_ACTORS.contains(&a.name.as_str()) {
-                    let out = path!(
+                let out = if !TITLE_ACTORS.contains(&a.name.as_str()) {
+                    path!(
                         &self.output
                             / &self.content
                             / "Actor"
                             / "Pack"
                             / format!("{}.sbactorpack", &a.name)
-                    );
-                    &a.pack.write_to_yaz0_file(&out).map_err(|e| {
-                        Box::from(format!("Error {:?} writing actor pack {}", e, &a.name))
-                    })?;
-                }
+                    )
+                } else {
+                    path!(
+                        &self.output
+                            / &self.content
+                            / "Pack"
+                            / "TitleBG.pack"
+                            / "Actor"
+                            / "Pack"
+                            / format!("{}.sbactorpack", &a.name)
+                    )
+                };
+                create_dir_all(out.parent().unwrap())?;
+                write_yaz0_sarc_to_file(&a.pack, &out).map_err(|e| {
+                    Box::<AnyError>::from(format!("Error {:?} writing actor pack {}", e, &a.name))
+                })?;
                 Ok(())
             })
             .collect::<GeneralResult<()>>()?;
+
+        println!("Loading SARCs to build...");
+        let sarcs = glob(path!(&self.input / "**" / "*").to_str().unwrap())
+            .expect("Weird, a glob error")
+            .filter_map(|d| {
+                if let Ok(path) = d {
+                    if path.is_dir() {
+                        if let Some(ext) = path.extension() {
+                            let ext = format!(".{}", ext.to_string_lossy());
+                            if SARC_EXTS.contains(&ext.as_str())
+                                && self.fresh_files.par_iter().any(|f| f.starts_with(&path))
+                            {
+                                return Some(path);
+                            }
+                        }
+                    }
+                }
+                None
+            })
+            .collect::<Vec<PathBuf>>();
+        println!("{:?}", sarcs);
 
         let time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -672,4 +707,14 @@ impl ModBuilder {
         println!("Mod built successfully!");
         Ok(())
     }
+}
+
+fn write_yaz0_sarc_to_file<P: AsRef<Path>>(sarc: &SarcFile, path: P) -> GeneralResult<()> {
+    let mut file = File::create(path.as_ref())?;
+    let writer = Yaz0Writer::new(&mut file);
+    let mut temp = vec![];
+    sarc.write(&mut temp)?;
+    writer
+        .compress_and_write(&temp, yaz0::CompressionLevel::Lookahead { quality: 10 })
+        .map_err(|e| Box::from(e))
 }
