@@ -16,6 +16,7 @@ use std::error::Error;
 use std::fs::{copy, create_dir_all, metadata, read, read_to_string, write, File};
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use yaz0::Yaz0Writer;
 
 type AnyError = dyn Error + Send + Sync;
@@ -643,6 +644,40 @@ impl ModBuilder {
                 }
             })
             .collect::<GeneralResult<()>>()?;
+
+        let actorinfo_dir = path!(&self.input / &self.content / "Actor" / "ActorInfo");
+        if actorinfo_dir.exists() {
+            let modded_actors: Vec<String> = self.actors.iter().map(|a| a.name).collect();
+            let actorinfo: BTreeMap<String, Byml> = BTreeMap::new();
+            let actorlist: Arc<Mutex<Vec<Byml>>> = Arc::new(Mutex::new(Vec::new()));
+            glob(&path!(actorinfo_dir / "*.yml").to_string_lossy())
+                .expect("Weird, a glob error")
+                .filter_map(|f| f.ok())
+                .collect::<Vec<PathBuf>>()
+                .par_iter()
+                .map(|f| -> GeneralResult<()> {
+                    let mut byml = Byml::from_binary(&read(&f)?)
+                        .map_err(|e| Box::<AnyError>::from(format!("{}", e)))?;
+                    let mut info = byml.as_hash()?.clone();
+                    let actor_name = byml.as_hash()?["name"].as_string()?;
+                    if modded_actors.contains(actor_name) {
+                        for (k, v) in self
+                            .actors
+                            .iter()
+                            .find(|a| &a.name == actor_name)
+                            .expect("Weird")
+                            .get_info()
+                            .as_hash()?
+                            .iter()
+                        {
+                            info.insert(k.to_string(), v.clone());
+                        }
+                    }
+                    actorlist.lock().unwrap().push(Byml::Hash(info));
+                    Ok(())
+                })
+                .collect::<GeneralResult<()>>()?;
+        }
 
         println!("Building actors...");
         self.actors
