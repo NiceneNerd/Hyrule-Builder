@@ -1,11 +1,12 @@
+use aamp::*;
 use botw_utils::extensions::*;
 use botw_utils::hashes::{Platform, StockHashTable};
-// use chrono::prelude::*;
-use aamp::*;
 use byml::Byml;
 use crc::crc32;
 use glob::glob;
+use indoc::indoc;
 use path_macro::path;
+use path_slash::PathExt;
 use pyo3::exceptions::*;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -571,11 +572,9 @@ impl ModBuilder {
                                 data: bytes,
                             }))
                         })
-                        .filter_map(|f| {
-                            match f {
-                                Ok(file) => Ok(file),
-                                Err
-                            }
+                        .filter_map(|f| match f {
+                            Ok(_) => f.transpose(),
+                            Err(e) => Some(Err(e)),
                         })
                         .collect::<GeneralResult<Vec<SarcEntry>>>()?,
                 },
@@ -900,6 +899,111 @@ impl ModBuilder {
         Ok(())
     }
 
+    fn add_folder_to_sarc(
+        &self,
+        root: &PathBuf,
+        dir: &PathBuf,
+        sarc: &mut SarcFile,
+    ) -> GeneralResult<()> {
+        for item in glob(path!(dir / "*").to_string_lossy().as_ref())
+            .expect("Weird, a glob error")
+            .filter_map(|f| f.ok())
+        {
+            if item.is_file() {
+                if !self.fresh_files.contains(&item) {
+                    continue;
+                }
+                let bytes = if &item.extension().unwrap().to_string_lossy() == "yml" {
+                    let sub_ext = format!(
+                        ".{}",
+                        item.with_extension("")
+                            .extension()
+                            .unwrap()
+                            .to_string_lossy(),
+                    );
+                    if AAMP_EXTS.contains(&sub_ext.as_str()) {
+                        ParameterIO::from_text(&fs::read_to_string(&item).unwrap())
+                            .unwrap()
+                            .to_binary()
+                            .unwrap()
+                    } else if BYML_EXTS.contains(&sub_ext.as_str()) {
+                        Byml::from_text(&fs::read_to_string(&item).unwrap())
+                            .unwrap()
+                            .to_binary(
+                                if self.be {
+                                    byml::Endian::Big
+                                } else {
+                                    byml::Endian::Little
+                                },
+                                2,
+                            )
+                            .unwrap()
+                    } else {
+                        fs::read(&item)?
+                    }
+                } else {
+                    fs::read(&item)?
+                };
+                sarc.files.push(SarcEntry {
+                    name: Some(item.strip_prefix(root)?.to_slash_lossy().into()),
+                    data: bytes,
+                });
+            } else if item.is_dir() {
+                if let Some(ext) = item.extension() {
+                    if SARC_EXTS.contains(&format!(".{}", ext.to_string_lossy()).as_str()) {
+                        let name: String = item.strip_prefix(root)?.to_slash_lossy().into();
+                        sarc.files.push(SarcEntry {
+                            name: Some(name.clone()),
+                            data: self.build_sarc(
+                                &item,
+                                if let Some(entry) =
+                                    sarc.files.iter().find(|e| e.name == Some(name.clone()))
+                                {
+                                    SarcFile::read(&entry.data)
+                                        .map_err(|e| Box::<AnyError>::from(format!("{:?}", e)))?
+                                } else {
+                                    SarcFile {
+                                        byte_order: if self.be {
+                                            sarc::Endian::Big
+                                        } else {
+                                            sarc::Endian::Little
+                                        },
+                                        files: vec![],
+                                    }
+                                },
+                            )?,
+                        });
+                        continue;
+                    }
+                }
+                self.add_folder_to_sarc(root, &item, sarc)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn build_sarc(&self, f: &PathBuf, mut sarc: SarcFile) -> GeneralResult<Vec<u8>> {
+        println!("Building {}", f.to_slash_lossy());
+        self.add_folder_to_sarc(f, f, &mut sarc)?;
+        if sarc.files.is_empty() {
+            return Ok(vec![]);
+        }
+        let mut data: Vec<u8> = vec![];
+        sarc.write(&mut data)?;
+        let ext = f.extension().unwrap().to_string_lossy();
+        if ext.starts_with(".s") && ext != "sarc" {
+            let mut compressed: Vec<u8> = vec![];
+            let ywrite = Yaz0Writer::new(&mut compressed);
+            ywrite.compress_and_write(
+                &data.as_slice(),
+                yaz0::CompressionLevel::Lookahead { quality: 10 },
+            )?;
+            Ok(compressed)
+        } else {
+            Ok(data)
+        }
+    }
+
     fn build_sarcs(&mut self) -> GeneralResult<()> {
         println!("Loading SARCs to build...");
         let sarcs = glob(path!(&self.input / "**" / "*").to_str().unwrap())
@@ -908,6 +1012,7 @@ impl ModBuilder {
                 if let Ok(path) = d {
                     if path.is_dir()
                         && !path.starts_with(path!(&self.input / &self.content / "Actor" / "Pack"))
+                        && nest_level(&path) == 0
                     {
                         if let Some(ext) = path.extension() {
                             let ext = format!(".{}", ext.to_string_lossy());
@@ -922,84 +1027,39 @@ impl ModBuilder {
                 None
             })
             .collect::<Vec<PathBuf>>();
-        println!("{:?}", sarcs);
 
+        println!("Building SARCs...");
         sarcs
             .par_iter()
             .map(|f| {
                 let out = path!(&self.output / f.strip_prefix(&self.input)?);
-                let mut sarc = if out.exists() {
-                    SarcFile {
-                        byte_order: if self.be {
-                            sarc::Endian::Big
-                        } else {
-                            sarc::Endian::Little
-                        },
-                        files: vec![],
-                    }
-                } else {
-                    SarcFile::read_from_file(&out)
-                        .map_err(|e| Box::<AnyError>::from(format!("{:?}", e)))?
-                };
-                for file in glob(path!(f / "**" / "*.*").to_string_lossy().as_ref())
-                    .expect("Glob error, weird")
-                    .filter_map(|f| {
-                        if let Ok(path) = f {
-                            if self.fresh_files.contains(&path) {
-                                Some(path)
-                            } else {
-                                None
+                fs::create_dir_all(out.parent().unwrap())?;
+                fs::write(
+                    &out,
+                    self.build_sarc(
+                        f,
+                        if !out.exists() {
+                            SarcFile {
+                                byte_order: if self.be {
+                                    sarc::Endian::Big
+                                } else {
+                                    sarc::Endian::Little
+                                },
+                                files: vec![],
                             }
                         } else {
-                            None
-                        }
-                    })
-                {
-                    if !self.fresh_files.contains(&file) {
-                        continue;
-                    }
-                    let bytes = if &file.extension().unwrap().to_string_lossy() == "yml" {
-                        let sub_ext = format!(
-                            ".{}",
-                            file.with_extension("")
-                                .extension()
-                                .unwrap()
-                                .to_string_lossy(),
-                        );
-                        if AAMP_EXTS.contains(&sub_ext.as_str()) {
-                            ParameterIO::from_text(&fs::read_to_string(&file).unwrap())
-                                .unwrap()
-                                .to_binary()
-                                .unwrap()
-                        } else if BYML_EXTS.contains(&sub_ext.as_str()) {
-                            Byml::from_text(&fs::read_to_string(&file).unwrap())
-                                .unwrap()
-                                .to_binary(byml::Endian::Big, 2)
-                                .unwrap()
-                        } else {
-                            fs::read(&file)?
-                        }
-                    } else {
-                        fs::read(&file)?
-                    };
-                    sarc.files.push(SarcEntry {
-                        name: Some(file.strip_prefix(f)?.to_string_lossy().into()),
-                        data: bytes,
-                    });
-                }
-                if sarc.files.is_empty() {
-                    return Ok(());
-                }
-                let ext = out.extension().unwrap().to_string_lossy();
-                fs::create_dir_all(out.parent().unwrap())?;
-                if ext.starts_with(".s") && ext != ".sarc" {
-                    write_yaz0_sarc_to_file(&sarc, &out)?;
-                } else {
-                    sarc.write_to_file(&out)?;
-                }
+                            println!("{}", out.to_string_lossy());
+                            SarcFile::read_from_file(&out)
+                                .map_err(|e| Box::<AnyError>::from(format!("{:?}", e)))?
+                        },
+                    )?,
+                )?;
                 Ok(())
             })
             .collect::<GeneralResult<()>>()?;
+
+        self.other_files.retain(|f| nest_level(f) < 1);
+        self.yml_files.retain(|f| nest_level(f) < 1);
         Ok(())
     }
 
@@ -1022,6 +1082,11 @@ impl ModBuilder {
             .collect::<GeneralResult<Vec<Actor>>>()?,
         );
 
+        self.build_actorinfo()?;
+        self.build_actors()?;
+        self.build_sarcs()?;
+        self.build_yaml()?;
+
         println!("Copying miscellaneous files...");
         self.other_files
             .par_iter()
@@ -1038,14 +1103,40 @@ impl ModBuilder {
             })
             .collect::<GeneralResult<()>>()?;
 
-        self.build_actorinfo()?;
-        self.build_actors()?;
-        self.build_sarcs()?;
-        self.build_yaml()?;
+        if !self.meta.is_empty() {
+            let text = format!(
+                "[Definition]
+titleIds = 00050000101C9300,00050000101C9400,00050000101C9500
+{}
+version = 4",
+                self.meta
+                    .iter()
+                    .map(|(k, v)| format!("{} = {}\n", k, v))
+                    .collect::<String>()
+            );
+            fs::write(path!(&self.output / "rules.txt"), text);
+        }
+
         self.save_times()?;
         println!("Mod built successfully!");
         Ok(())
     }
+}
+
+fn nest_level<P: AsRef<Path>>(file: P) -> usize {
+    let file = file.as_ref();
+    file.ancestors()
+        .filter(|d| {
+            if d == &file {
+                return false;
+            }
+            if let Some(ext) = d.extension() {
+                SARC_EXTS.contains(&format!(".{}", ext.to_string_lossy()).as_str())
+            } else {
+                false
+            }
+        })
+        .count()
 }
 
 fn write_yaz0_sarc_to_file<P: AsRef<Path>>(sarc: &SarcFile, path: P) -> GeneralResult<()> {
