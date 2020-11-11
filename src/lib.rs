@@ -257,6 +257,17 @@ pub struct ModBuilder {
 }
 
 impl ModBuilder {
+    fn warn(&self, msg: &str) -> GeneralResult<()> {
+        if self.strict {
+            Err(Box::<AnyError>::from(msg.to_owned()))
+        } else {
+            if self.warn {
+                println!("{}", msg);
+            }
+            Ok(())
+        }
+    }
+
     fn parse_pio(&self, file: &PathBuf) -> GeneralResult<ParameterIO> {
         match file.extension().unwrap().to_str().unwrap() {
             "yml" => match ParameterIO::from_text(&fs::read_to_string(file)?) {
@@ -517,8 +528,9 @@ impl ModBuilder {
                     },
                     files: file_map
                         .iter()
-                        .map(|(k, v)| -> GeneralResult<SarcEntry> {
-                            let bytes = if &v.extension().unwrap().to_string_lossy() == "yml" {
+                        .map(|(k, v)| -> GeneralResult<Option<SarcEntry>> {
+                            let ext = &v.extension().unwrap().to_string_lossy();
+                            let bytes = if ext == "yml" {
                                 let sub_ext = format!(
                                     ".{}",
                                     v.with_extension("").extension().unwrap().to_string_lossy(),
@@ -534,15 +546,36 @@ impl ModBuilder {
                                         .to_binary(byml::Endian::Big, 2)
                                         .unwrap()
                                 } else {
-                                    fs::read(&v)?
+                                    fs::read(&v).unwrap()
                                 }
                             } else {
-                                fs::read(&v)?
+                                match fs::read(&v).map_err(|_| {
+                                    Box::<AnyError>::from(format!(
+                                        "Cannot read file {}",
+                                        v.to_string_lossy()
+                                    ))
+                                }) {
+                                    Ok(data) => data,
+                                    Err(e) => {
+                                        if ext.starts_with("hk") {
+                                            self.warn(&format!("{:?}", e))?;
+                                            return Ok(None);
+                                        } else {
+                                            return Err(e);
+                                        }
+                                    }
+                                }
                             };
-                            Ok(SarcEntry {
+                            Ok(Some(SarcEntry {
                                 name: Some(k.to_owned()),
                                 data: bytes,
-                            })
+                            }))
+                        })
+                        .filter_map(|f| {
+                            match f {
+                                Ok(file) => Ok(file),
+                                Err
+                            }
                         })
                         .collect::<GeneralResult<Vec<SarcEntry>>>()?,
                 },
@@ -627,13 +660,14 @@ impl ModBuilder {
 
     fn build_actorinfo(&mut self) -> GeneralResult<()> {
         let actorinfo_dir = path!(&self.input / &self.content / "Actor" / "ActorInfo");
+        let is_info = |f: &PathBuf| {
+            f.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .ends_with(".info.yml")
+        };
         if actorinfo_dir.exists()
-            && (self.fresh_files.par_iter().any(|f| {
-                f.file_name()
-                    .unwrap()
-                    .to_string_lossy()
-                    .ends_with(".info.yml")
-            }) || self.actors.len() > 0)
+            && (self.fresh_files.par_iter().any(is_info) || !self.actors.is_empty())
         {
             println!("Building actor info...");
             let modded_actors: Vec<String> =
@@ -820,11 +854,7 @@ impl ModBuilder {
             .par_iter()
             .filter(|f| {
                 self.fresh_files.contains(&f)
-                    && !(f
-                        .ancestors()
-                        .map(|p| p.to_owned())
-                        .collect::<Vec<PathBuf>>()
-                        .contains(&actorpath)
+                    && !(f.ancestors().map(|p| p.to_owned()).any(|x| x == actorpath)
                         || f.file_name().unwrap().to_string_lossy() == "config.yml")
             })
             .map(|f| {
@@ -832,7 +862,7 @@ impl ModBuilder {
                     ".{}",
                     f.with_extension("")
                         .extension()
-                        .expect(&format!(
+                        .unwrap_or_else(|| panic!(
                             "File {} missing extension",
                             &f.as_os_str().to_string_lossy()
                         ))
@@ -913,7 +943,17 @@ impl ModBuilder {
                 };
                 for file in glob(path!(f / "**" / "*.*").to_string_lossy().as_ref())
                     .expect("Glob error, weird")
-                    .filter_map(|f| f.ok())
+                    .filter_map(|f| {
+                        if let Ok(path) = f {
+                            if self.fresh_files.contains(&path) {
+                                Some(path)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
                 {
                     if !self.fresh_files.contains(&file) {
                         continue;
@@ -946,6 +986,16 @@ impl ModBuilder {
                         name: Some(file.strip_prefix(f)?.to_string_lossy().into()),
                         data: bytes,
                     });
+                }
+                if sarc.files.is_empty() {
+                    return Ok(());
+                }
+                let ext = out.extension().unwrap().to_string_lossy();
+                fs::create_dir_all(out.parent().unwrap())?;
+                if ext.starts_with(".s") && ext != ".sarc" {
+                    write_yaz0_sarc_to_file(&sarc, &out)?;
+                } else {
+                    sarc.write_to_file(&out)?;
                 }
                 Ok(())
             })
