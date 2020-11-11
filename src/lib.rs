@@ -819,12 +819,13 @@ impl ModBuilder {
         self.yml_files
             .par_iter()
             .filter(|f| {
-                !(f.as_os_str().to_string_lossy().contains("Msg_")
-                    || f.ancestors()
+                self.fresh_files.contains(&f)
+                    && !(f
+                        .ancestors()
                         .map(|p| p.to_owned())
                         .collect::<Vec<PathBuf>>()
                         .contains(&actorpath)
-                    || f.file_name().unwrap().to_string_lossy() == "config.yml")
+                        || f.file_name().unwrap().to_string_lossy() == "config.yml")
             })
             .map(|f| {
                 let ext = format!(
@@ -875,7 +876,9 @@ impl ModBuilder {
             .expect("Weird, a glob error")
             .filter_map(|d| {
                 if let Ok(path) = d {
-                    if path.is_dir() {
+                    if path.is_dir()
+                        && !path.starts_with(path!(&self.input / &self.content / "Actor" / "Pack"))
+                    {
                         if let Some(ext) = path.extension() {
                             let ext = format!(".{}", ext.to_string_lossy());
                             if SARC_EXTS.contains(&ext.as_str())
@@ -890,6 +893,63 @@ impl ModBuilder {
             })
             .collect::<Vec<PathBuf>>();
         println!("{:?}", sarcs);
+
+        sarcs
+            .par_iter()
+            .map(|f| {
+                let out = path!(&self.output / f.strip_prefix(&self.input)?);
+                let mut sarc = if out.exists() {
+                    SarcFile {
+                        byte_order: if self.be {
+                            sarc::Endian::Big
+                        } else {
+                            sarc::Endian::Little
+                        },
+                        files: vec![],
+                    }
+                } else {
+                    SarcFile::read_from_file(&out)
+                        .map_err(|e| Box::<AnyError>::from(format!("{:?}", e)))?
+                };
+                for file in glob(path!(f / "**" / "*.*").to_string_lossy().as_ref())
+                    .expect("Glob error, weird")
+                    .filter_map(|f| f.ok())
+                {
+                    if !self.fresh_files.contains(&file) {
+                        continue;
+                    }
+                    let bytes = if &file.extension().unwrap().to_string_lossy() == "yml" {
+                        let sub_ext = format!(
+                            ".{}",
+                            file.with_extension("")
+                                .extension()
+                                .unwrap()
+                                .to_string_lossy(),
+                        );
+                        if AAMP_EXTS.contains(&sub_ext.as_str()) {
+                            ParameterIO::from_text(&fs::read_to_string(&file).unwrap())
+                                .unwrap()
+                                .to_binary()
+                                .unwrap()
+                        } else if BYML_EXTS.contains(&sub_ext.as_str()) {
+                            Byml::from_text(&fs::read_to_string(&file).unwrap())
+                                .unwrap()
+                                .to_binary(byml::Endian::Big, 2)
+                                .unwrap()
+                        } else {
+                            fs::read(&file)?
+                        }
+                    } else {
+                        fs::read(&file)?
+                    };
+                    sarc.files.push(SarcEntry {
+                        name: Some(file.strip_prefix(f)?.to_string_lossy().into()),
+                        data: bytes,
+                    });
+                }
+                Ok(())
+            })
+            .collect::<GeneralResult<()>>()?;
         Ok(())
     }
 
@@ -929,12 +989,9 @@ impl ModBuilder {
             .collect::<GeneralResult<()>>()?;
 
         self.build_actorinfo()?;
-
         self.build_actors()?;
-
-        self.build_yaml()?;
-
         self.build_sarcs()?;
+        self.build_yaml()?;
         self.save_times()?;
         println!("Mod built successfully!");
         Ok(())
