@@ -1,3 +1,4 @@
+use rayon::prelude::*;
 use sarc::SarcEntry;
 
 pub type SarcFile = sarc::SarcFile;
@@ -10,12 +11,18 @@ pub trait SarcFileExt {
 
 impl SarcFileExt for SarcFile {
     fn get_file(&self, path: &str) -> Option<&SarcEntry> {
-        self.files.iter().find(|x| x.name == Some(path.to_owned()))
+        self.files
+            .par_iter()
+            .find_first(|x| x.name == Some(path.to_owned()))
     }
 
     fn add_file(&mut self, path: &str, data: &[u8]) -> () {
         if let Some(file) = self.get_file(path) {
-            let pos = self.files.iter().position(|x| x.name == file.name).unwrap();
+            let pos = self
+                .files
+                .par_iter()
+                .position_first(|x| x.name == file.name)
+                .unwrap();
             self.files.remove(pos);
         };
         self.files.push(SarcEntry {

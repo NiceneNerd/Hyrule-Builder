@@ -23,6 +23,7 @@ use yaz0::Yaz0Writer;
 
 type AnyError = dyn Error + Send + Sync;
 type GeneralResult<T> = Result<T, Box<AnyError>>;
+const COMPRESS: yaz0::CompressionLevel = yaz0::CompressionLevel::Naive { quality: 6 };
 
 static TITLE_ACTORS: [&str; 58] = [
     "AncientArrow",
@@ -159,6 +160,7 @@ impl Actor {
 
 #[pyfunction]
 pub fn build_mod(args: BuildArgs, meta: &PyDict) -> PyResult<()> {
+    println!("Loading build config...");
     let input = PathBuf::from(&args.input);
     let output = if let Some(out) = args.output {
         PathBuf::from(out)
@@ -183,7 +185,7 @@ pub fn build_mod(args: BuildArgs, meta: &PyDict) -> PyResult<()> {
     if path!(input / ".done").exists() {
         for line in fs::read_to_string(path!(input / ".done"))?
             .split('\n')
-            .filter(|x| *x != "")
+            .filter(|x| x != &"")
         {
             let data: Vec<&str> = line.split(',').collect();
             file_times.insert(
@@ -207,10 +209,9 @@ pub fn build_mod(args: BuildArgs, meta: &PyDict) -> PyResult<()> {
         content,
         aoc,
         titles: TITLE_ACTORS
-            .iter()
+            .par_iter()
             .map(|x| x.to_owned())
-            .chain(args.title_actors.split(','))
-            .into_iter()
+            .chain(args.title_actors.par_split(','))
             .map(|x| x.to_owned())
             .collect::<HashSet<String>>(),
         table: StockHashTable::new(
@@ -261,9 +262,10 @@ pub struct ModBuilder {
 }
 
 impl ModBuilder {
+    #[inline(always)]
     fn warn(&self, msg: &str) -> GeneralResult<()> {
         if self.strict {
-            Err(Box::<AnyError>::from(msg.to_owned()))
+            Err(box_any_error(msg))
         } else {
             if self.warn {
                 println!("{}", msg);
@@ -272,12 +274,14 @@ impl ModBuilder {
         }
     }
 
+    #[inline(always)]
     fn vprint<S: AsRef<str>>(&self, msg: S) -> () {
         if self.verbose {
             println!("{}", msg.as_ref());
         }
     }
 
+    #[inline(always)]
     fn parse_pio(&self, file: &PathBuf) -> GeneralResult<ParameterIO> {
         match file.extension().unwrap().to_str().unwrap() {
             "yml" => match ParameterIO::from_text(&fs::read_to_string(file)?) {
@@ -541,8 +545,7 @@ impl ModBuilder {
                         .map(|(k, v)| -> GeneralResult<Option<SarcEntry>> {
                             let ext = &v.extension().unwrap().to_string_lossy();
                             let bytes = if ext == "yml" {
-                                let sub_ext = format!(
-                                    ".{}",
+                                let sub_ext = dot_ext(
                                     v.with_extension("").extension().unwrap().to_string_lossy(),
                                 );
                                 if AAMP_EXTS.contains(&sub_ext.as_str()) {
@@ -551,10 +554,22 @@ impl ModBuilder {
                                         .to_binary()
                                         .unwrap()
                                 } else if BYML_EXTS.contains(&sub_ext.as_str()) {
-                                    Byml::from_text(&fs::read_to_string(&v).unwrap())
+                                    let data = Byml::from_text(&fs::read_to_string(&v).unwrap())
                                         .unwrap()
-                                        .to_binary(byml::Endian::Big, 2)
-                                        .unwrap()
+                                        .to_binary(
+                                            if self.be {
+                                                byml::Endian::Big
+                                            } else {
+                                                byml::Endian::Little
+                                            },
+                                            2,
+                                        )
+                                        .unwrap();
+                                    if sub_ext.starts_with(".s") {
+                                        compress(data.as_slice())
+                                    } else {
+                                        data
+                                    }
                                 } else {
                                     fs::read(&v).unwrap()
                                 }
@@ -712,11 +727,12 @@ impl ModBuilder {
                 })
                 .collect::<GeneralResult<()>>()?;
             let mut actorlist = actorlist.lock().unwrap().to_owned();
-            let mut hashlist: BTreeSet<u32> = BTreeSet::new();
-            actorlist.sort_by_key(|a| {
+            // let mut hashlist: BTreeSet<u32> = BTreeSet::new();
+            let hashlist: Arc<Mutex<BTreeSet<u32>>> = Arc::new(Mutex::new(BTreeSet::new()));
+            actorlist.par_sort_by_key(|a| {
                 let name = a.as_hash().unwrap()["name"].as_string().unwrap();
                 let hash = crc32::checksum_ieee(name.as_bytes());
-                hashlist.insert(hash);
+                hashlist.lock().unwrap().insert(hash);
                 hash
             });
             actorinfo.insert("Actors".to_owned(), Byml::Array(actorlist));
@@ -724,6 +740,8 @@ impl ModBuilder {
                 "Hashes".to_owned(),
                 Byml::Array(
                     hashlist
+                        .lock()
+                        .unwrap()
                         .par_iter()
                         .map(|h| {
                             if h < &2147483648 {
@@ -738,88 +756,14 @@ impl ModBuilder {
             fs::create_dir_all(path!(&self.output / &self.content / "Actor"))?;
             fs::write(
                 path!(&self.output / &self.content / "Actor" / "ActorInfo.product.sbyml"),
-                Byml::Hash(actorinfo).to_compressed_binary(
+                compress(Byml::Hash(actorinfo).to_binary(
                     if self.be {
                         byml::Endian::Big
                     } else {
-                        if actorinfo_dir.exists() {
-                            println!("Building actor info...");
-                            let modded_actors: Vec<String> =
-                                self.actors.iter().map(|a| a.name.to_owned()).collect();
-                            let mut actorinfo: BTreeMap<String, Byml> = BTreeMap::new();
-                            let actorlist: Arc<Mutex<Vec<Byml>>> = Arc::new(Mutex::new(Vec::new()));
-                            glob(&path!(actorinfo_dir / "*.yml").to_string_lossy())
-                                .expect("Weird, a glob error")
-                                .filter_map(|f| f.ok())
-                                .collect::<Vec<PathBuf>>()
-                                .par_iter()
-                                .map(|f| -> GeneralResult<()> {
-                                    if let Byml::Hash(mut info) =
-                                        Byml::from_text(&fs::read_to_string(&f)?)
-                                            .map_err(|e| Box::<AnyError>::from(format!("{}", e)))?
-                                    {
-                                        let actor_name = info["name"].as_string()?.clone();
-                                        if modded_actors.contains(&actor_name) {
-                                            info.extend(
-                                                self.actors
-                                                    .iter()
-                                                    .find(|a| a.name == actor_name)
-                                                    .expect("Weird")
-                                                    .get_info(),
-                                            )
-                                        }
-                                        actorlist.lock().unwrap().push(Byml::Hash(info));
-                                    }
-                                    // let mut info: BTreeMap<String, Byml> = std::mem::take(&mut byml);
-                                    Ok(())
-                                })
-                                .collect::<GeneralResult<()>>()?;
-                            let mut actorlist = actorlist.lock().unwrap().to_owned();
-                            let mut hashlist: BTreeSet<u32> = BTreeSet::new();
-                            actorlist.sort_by_key(|a| {
-                                let name = a.as_hash().unwrap()["name"].as_string().unwrap();
-                                let hash = crc32::checksum_ieee(name.as_bytes());
-                                hashlist.insert(hash);
-                                hash
-                            });
-                            actorinfo.insert("Actors".to_owned(), Byml::Array(actorlist));
-                            actorinfo.insert(
-                                "Hashes".to_owned(),
-                                Byml::Array(
-                                    hashlist
-                                        .par_iter()
-                                        .map(|h| {
-                                            if h < &2147483648 {
-                                                Byml::Int(*h as i32)
-                                            } else {
-                                                Byml::UInt(*h)
-                                            }
-                                        })
-                                        .collect(),
-                                ),
-                            );
-                            fs::create_dir_all(path!(&self.output / &self.content / "Actor"))?;
-                            fs::write(
-                                path!(
-                                    &self.output
-                                        / &self.content
-                                        / "Actor"
-                                        / "ActorInfo.product.sbyml"
-                                ),
-                                Byml::Hash(actorinfo).to_compressed_binary(
-                                    if self.be {
-                                        byml::Endian::Big
-                                    } else {
-                                        byml::Endian::Little
-                                    },
-                                    2,
-                                )?,
-                            )?;
-                        }
                         byml::Endian::Little
                     },
                     2,
-                )?,
+                )?),
             )?;
         }
         Ok(())
@@ -870,11 +814,11 @@ impl ModBuilder {
                     .into_par_iter()
                     .map(|a| {
                         self.vprint(format!("Building actor {}", &a.name));
-                        let mut bytes: Vec<u8> = vec![];
-                        a.pack.write_yaz0(&mut bytes).map_err(box_any_error)?;
+                        let mut tmp: Vec<u8> = vec![];
+                        a.pack.write(&mut tmp).map_err(box_any_error)?;
                         let actor = SarcEntry {
                             name: Some(format!("Actor/Pack/{}.sbactorpack", a.name)),
-                            data: bytes,
+                            data: compress(tmp.as_slice()),
                         };
                         self.vprint(format!("Built actor {}", &a.name));
                         Ok(actor)
@@ -899,15 +843,16 @@ impl ModBuilder {
             })
             .map(|f| {
                 self.vprint(format!("Building {}", f.to_slash_lossy()));
-                let ext = format!(
-                    ".{}",
+                let ext = dot_ext(
                     f.with_extension("")
                         .extension()
-                        .unwrap_or_else(|| panic!(
-                            "File {} missing extension",
-                            &f.as_os_str().to_string_lossy()
-                        ))
-                        .to_string_lossy()
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "File {} missing extension",
+                                &f.as_os_str().to_string_lossy()
+                            )
+                        })
+                        .to_string_lossy(),
                 );
                 let out = path!(&self.output / f.strip_prefix(&self.input)?.with_extension(""));
                 fs::create_dir_all(out.parent().unwrap())?;
@@ -918,14 +863,14 @@ impl ModBuilder {
                     } else {
                         byml::Endian::Little
                     };
-                    fs::write(
-                        out,
+                    fs::write(out, {
+                        let data = byml.to_binary(endian, 2)?;
                         if ext.starts_with(".s") {
-                            byml.to_compressed_binary(endian, 2)?
+                            compress(data)
                         } else {
-                            byml.to_binary(endian, 2)?
-                        },
-                    )?;
+                            data
+                        }
+                    })?;
                 } else if AAMP_EXTS.contains(&ext.as_str()) {
                     fs::write(out, self.parse_pio(&f)?.to_binary().map_err(box_any_error)?)?;
                 }
@@ -950,8 +895,7 @@ impl ModBuilder {
                     continue;
                 }
                 let bytes = if &item.extension().unwrap().to_string_lossy() == "yml" {
-                    let sub_ext = format!(
-                        ".{}",
+                    let sub_ext = dot_ext(
                         item.with_extension("")
                             .extension()
                             .unwrap()
@@ -963,7 +907,7 @@ impl ModBuilder {
                             .to_binary()
                             .unwrap()
                     } else if BYML_EXTS.contains(&sub_ext.as_str()) {
-                        Byml::from_text(&fs::read_to_string(&item).unwrap())
+                        let data = Byml::from_text(&fs::read_to_string(&item).unwrap())
                             .unwrap()
                             .to_binary(
                                 if self.be {
@@ -972,8 +916,12 @@ impl ModBuilder {
                                     byml::Endian::Little
                                 },
                                 2,
-                            )
-                            .unwrap()
+                            )?;
+                        if sub_ext.starts_with(".s") {
+                            compress(data.as_slice())
+                        } else {
+                            data
+                        }
                     } else {
                         fs::read(&item)?
                     }
@@ -983,14 +931,16 @@ impl ModBuilder {
                 sarc.add_file(item.strip_prefix(root)?.to_slash_lossy().as_str(), &bytes);
             } else if item.is_dir() {
                 if let Some(ext) = item.extension() {
-                    if SARC_EXTS.contains(&format!(".{}", ext.to_string_lossy()).as_str()) {
+                    if SARC_EXTS.contains(&dot_ext(ext.to_string_lossy()).as_str()) {
                         let name: String = item.strip_prefix(root)?.to_slash_lossy().into();
                         sarc.add_file(
                             name.as_str(),
                             self.build_sarc(
                                 &item,
-                                if let Some(entry) =
-                                    sarc.files.iter().find(|e| e.name == Some(name.clone()))
+                                if let Some(entry) = sarc
+                                    .files
+                                    .par_iter()
+                                    .find_first(|e| e.name == Some(name.clone()))
                                 {
                                     SarcFile::read(&entry.data).map_err(box_any_error)?
                                 } else {
@@ -1025,13 +975,7 @@ impl ModBuilder {
         sarc.write(&mut data)?;
         let ext = f.extension().unwrap().to_string_lossy();
         if ext.starts_with(".s") && ext != "sarc" {
-            let mut compressed: Vec<u8> = vec![];
-            let ywrite = Yaz0Writer::new(&mut compressed);
-            ywrite.compress_and_write(
-                &data.as_slice(),
-                yaz0::CompressionLevel::Lookahead { quality: 10 },
-            )?;
-            Ok(compressed)
+            Ok(compress(data.as_slice()))
         } else {
             Ok(data)
         }
@@ -1048,7 +992,7 @@ impl ModBuilder {
                         && nest_level(&path) == 0
                     {
                         if let Some(ext) = path.extension() {
-                            let ext = format!(".{}", ext.to_string_lossy());
+                            let ext = dot_ext(ext.to_string_lossy());
                             if SARC_EXTS.contains(&ext.as_str())
                                 && self.fresh_files.par_iter().any(|f| f.starts_with(&path))
                             {
@@ -1081,7 +1025,6 @@ impl ModBuilder {
                                 files: vec![],
                             }
                         } else {
-                            println!("{}", out.to_string_lossy());
                             SarcFile::read_from_file(&out).map_err(box_any_error)?
                         },
                     )?,
@@ -1108,8 +1051,13 @@ impl ModBuilder {
             .filter_map(|f| f.ok())
             .collect::<Vec<PathBuf>>()
             .par_iter()
-            .filter(|f| f.to_string_lossy().contains("ActorLink"))
-            .filter_map(|f| self.parse_actor(f).transpose())
+            .filter_map(|f| {
+                if f.to_string_lossy().contains("ActorLink") {
+                    self.parse_actor(f).transpose()
+                } else {
+                    None
+                }
+            })
             .collect::<GeneralResult<Vec<Actor>>>()?,
         );
 
@@ -1161,12 +1109,25 @@ fn nest_level<P: AsRef<Path>>(file: P) -> usize {
                 return false;
             }
             if let Some(ext) = d.extension() {
-                SARC_EXTS.contains(&format!(".{}", ext.to_string_lossy()).as_str())
+                SARC_EXTS.contains(&dot_ext(ext.to_string_lossy()).as_str())
             } else {
                 false
             }
         })
         .count()
+}
+
+#[inline(always)]
+fn dot_ext<S: AsRef<str>>(ext: S) -> String {
+    [".", ext.as_ref()].join("")
+}
+
+#[inline(always)]
+fn compress<B: AsRef<[u8]>>(data: B) -> Vec<u8> {
+    let mut bytes: Vec<u8> = vec![];
+    let ywrite = Yaz0Writer::new(&mut bytes);
+    ywrite.compress_and_write(data.as_ref(), COMPRESS).unwrap();
+    bytes
 }
 
 fn write_yaz0_sarc_to_file<P: AsRef<Path>>(sarc: &SarcFile, path: P) -> GeneralResult<()> {
@@ -1175,10 +1136,11 @@ fn write_yaz0_sarc_to_file<P: AsRef<Path>>(sarc: &SarcFile, path: P) -> GeneralR
     let mut temp = vec![];
     sarc.write(&mut temp)?;
     writer
-        .compress_and_write(&temp, yaz0::CompressionLevel::Lookahead { quality: 10 })
+        .compress_and_write(&temp, COMPRESS)
         .map_err(Box::from)
 }
 
+#[inline(always)]
 fn box_any_error<D: std::fmt::Debug>(error: D) -> Box<AnyError> {
     Box::<AnyError>::from(format!("{:?}", error).trim_matches('"'))
 }
