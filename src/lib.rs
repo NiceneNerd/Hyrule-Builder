@@ -24,7 +24,7 @@ use yaz0::Yaz0Writer;
 
 type AnyError = dyn Error + Send + Sync;
 type GeneralResult<T> = Result<T, Box<AnyError>>;
-const COMPRESS: yaz0::CompressionLevel = yaz0::CompressionLevel::Naive { quality: 6 };
+const COMPRESS: yaz0::CompressionLevel = yaz0::CompressionLevel::Lookahead { quality: 10 };
 
 static TITLE_ACTORS: [&str; 58] = [
     "AncientArrow",
@@ -782,7 +782,11 @@ impl ModBuilder {
     }
 
     fn build_actors(&mut self) -> GeneralResult<()> {
+        if self.actors.is_empty() {
+            return Ok(());
+        }
         println!("Building {} total actors...", self.actors.len());
+        fs::create_dir_all(path!(&self.output / &self.content / "Actor" / "Pack"))?;
         self.actors
             .par_iter()
             .filter(|a| !self.titles.contains(&a.name))
@@ -802,7 +806,6 @@ impl ModBuilder {
                 } else {
                     &a.pack
                 };
-                fs::create_dir_all(out.parent().unwrap())?;
                 write_yaz0_sarc_to_file(&pack, &out)?;
                 Ok(())
             })
@@ -855,8 +858,7 @@ impl ModBuilder {
             );
             self.vprint("Saving TitleBG actors...");
             fs::create_dir_all(title_path.parent().unwrap())?;
-            fs::remove_file(&title_path).unwrap_or_else(|_| ());
-            write_sarc_to_file(&sarc, &title_path)?;
+            sarc.write_to_file(&title_path)?;
             self.vprint("Finished all actors");
         }
         Ok(())
@@ -886,7 +888,9 @@ impl ModBuilder {
                         .to_string_lossy(),
                 );
                 let out = path!(&self.output / f.strip_prefix(&self.input)?.with_extension(""));
-                fs::create_dir_all(out.parent().unwrap())?;
+                if !out.parent().unwrap().exists() {
+                    fs::create_dir_all(out.parent().unwrap())?;
+                }
                 if BYML_EXTS.contains(&ext.as_str()) {
                     let byml = Byml::from_text(&fs::read_to_string(&f)?).map_err(box_any_error)?;
                     let endian = if self.be {
@@ -1162,13 +1166,6 @@ fn write_yaz0_sarc_to_file<P: AsRef<Path>>(sarc: &SarcFile, path: P) -> GeneralR
     writer
         .compress_and_write(&temp, COMPRESS)
         .map_err(Box::from)
-}
-
-fn write_sarc_to_file<P: AsRef<Path>>(sarc: &SarcFile, path: P) -> GeneralResult<()> {
-    let mut bytes: Vec<u8> = vec![];
-    sarc.write(&mut bytes)?;
-    fs::write(path, &bytes)?;
-    Ok(())
 }
 
 #[inline]
