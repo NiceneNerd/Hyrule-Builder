@@ -1,7 +1,7 @@
 mod sarc_ext;
 use aamp::*;
 use botw_utils::extensions::*;
-use botw_utils::hashes::{Platform, StockHashTable};
+// use botw_utils::hashes::{Platform, StockHashTable};
 use byml::Byml;
 use crc::crc32;
 use glob::glob;
@@ -167,16 +167,18 @@ pub fn build_mod(args: BuildArgs, meta: &PyDict) -> PyResult<()> {
     } else {
         path!(input / "build")
     };
-    let content = String::from(if args.be {
+    let content = if args.be {
         "content"
     } else {
         "01007EF00011E000/romfs"
-    });
-    let aoc = String::from(if args.be {
+    }
+    .to_owned();
+    let aoc = if args.be {
         "aoc"
     } else {
         "01007EF00011F001/romfs"
-    });
+    }
+    .to_owned();
 
     if !path!(input / content).exists() && !path!(input / aoc).exists() {
         return Err(PyValueError::new_err("Invalid folders"));
@@ -214,13 +216,6 @@ pub fn build_mod(args: BuildArgs, meta: &PyDict) -> PyResult<()> {
             .chain(args.title_actors.par_split(','))
             .map(|x| x.to_owned())
             .collect::<HashSet<String>>(),
-        table: StockHashTable::new(
-            &(if args.be {
-                Platform::WiiU
-            } else {
-                Platform::Switch
-            }),
-        ),
         file_times,
         actors: vec![],
         fresh_files: vec![],
@@ -248,7 +243,6 @@ pub struct ModBuilder {
     guess: bool,
     verbose: bool,
     titles: HashSet<String>,
-    table: StockHashTable,
     warn: bool,
     strict: bool,
     single: bool,
@@ -263,7 +257,7 @@ pub struct ModBuilder {
 
 impl ModBuilder {
     #[inline(always)]
-    fn warn(&self, msg: &str) -> GeneralResult<()> {
+    fn warn<S: std::fmt::Display + std::fmt::Debug>(&self, msg: S) -> GeneralResult<()> {
         if self.strict {
             Err(box_any_error(msg))
         } else {
@@ -275,7 +269,7 @@ impl ModBuilder {
     }
 
     #[inline(always)]
-    fn vprint<S: AsRef<str>>(&self, msg: S) -> () {
+    fn vprint<S: AsRef<str>>(&self, msg: S) {
         if self.verbose {
             println!("{}", msg.as_ref());
         }
@@ -308,225 +302,242 @@ impl ModBuilder {
 
     fn parse_actor(&self, link: &PathBuf) -> GeneralResult<Option<Actor>> {
         let yml = fs::read_to_string(link)?;
-        let pio: ParameterIO = match ParameterIO::from_text(&yml) {
-            Ok(pio) => pio,
-            Err(e) => return Err(Box::from(format!("{:?}", e))),
-        };
+        let pio: ParameterIO = ParameterIO::from_text(&yml).map_err(box_any_error)?;
         let actor_dir = path!(self.input / self.content / "Actor");
 
-        let mut file_map: HashMap<String, PathBuf> = HashMap::new();
-        for (k, v) in pio
-            .object("LinkTarget")
+        // let mut file_map: HashMap<String, PathBuf> = HashMap::new();
+        let file_map: Arc<Mutex<HashMap<String, PathBuf>>> = Arc::new(Mutex::new(HashMap::new()));
+        pio.object("LinkTarget")
             .ok_or(format!("No LinkTarget found in {:?}", link))?
             .params()
-            .iter()
-        {
-            if let Parameter::StringRef(v) = v {
-                if v == "Dummy" {
-                    continue;
-                }
-                let param_path = match k {
-                    3293308145 => "AIProgram/{}.baiprog",
-                    2851261459 => "AISchedule/{}.baischedule",
-                    1241489578 => "AnimationInfo/{}.baniminfo",
-                    1767976113 => "Awareness/{}.bawareness",
-                    713857735 => "BoneControl/{}.bbonectrl",
-                    2863165669 => "Chemical/{}.bchemical",
-                    2307148887 => "DamageParam/{}.bdmgparam",
-                    2189637974 => "DropTable/{}.bdrop",
-                    619158934 => "GeneralParamList/{}.bgparamlist",
-                    414149463 => "LifeCondition/{}.blifecondition",
-                    1096753192 => "LOD/{}.blod",
-                    3086518481 => "ModelList/{}.bmodellist",
-                    1292038778 => "RagdollBlendWeight/{}.brgbw",
-                    1589643025 => "Recipe/{}.brecipe",
-                    2994379201 => "ShopData/{}.bshop",
-                    3926186935 => "UMii/{}.bumii",
-                    110127898 => "ASList/{}.baslist",
-                    1086735552 => "AttClientList/{}.batcllist",
-                    4022948047 => "RagdollConfigList/{}.brgconfiglist",
-                    2366604039 => "Physics/{}.bphysics",
-                    _ => continue,
-                }
-                .replace("{}", &v);
-                file_map.insert(
-                    format!("Actor/{}", &param_path),
-                    path!(actor_dir / (param_path + ".yml")),
-                );
-                match k {
-                    110127898 => {
-                        // ASUser
-                        let aslist = self.parse_pio(&path!(
-                            actor_dir / "ASList" / format!("{}.baslist.yml", v)
-                        ))?;
-                        for anim in aslist.list("ASDefines").unwrap().objects.values() {
-                            if let Parameter::String64(filename) = anim.param("Filename").unwrap() {
-                                if filename == "Dummy" {
-                                    continue;
+            .par_iter()
+            .map(|(k, v)| -> GeneralResult<()> {
+                if let Parameter::StringRef(v) = v {
+                    if v == "Dummy" {
+                        return Ok(());
+                    }
+                    let param_path = match k {
+                        3293308145 => "AIProgram/{}.baiprog",
+                        2851261459 => "AISchedule/{}.baischedule",
+                        1241489578 => "AnimationInfo/{}.baniminfo",
+                        1767976113 => "Awareness/{}.bawareness",
+                        713857735 => "BoneControl/{}.bbonectrl",
+                        2863165669 => "Chemical/{}.bchemical",
+                        2307148887 => "DamageParam/{}.bdmgparam",
+                        2189637974 => "DropTable/{}.bdrop",
+                        619158934 => "GeneralParamList/{}.bgparamlist",
+                        414149463 => "LifeCondition/{}.blifecondition",
+                        1096753192 => "LOD/{}.blod",
+                        3086518481 => "ModelList/{}.bmodellist",
+                        1292038778 => "RagdollBlendWeight/{}.brgbw",
+                        1589643025 => "Recipe/{}.brecipe",
+                        2994379201 => "ShopData/{}.bshop",
+                        3926186935 => "UMii/{}.bumii",
+                        110127898 => "ASList/{}.baslist",
+                        1086735552 => "AttClientList/{}.batcllist",
+                        4022948047 => "RagdollConfigList/{}.brgconfiglist",
+                        2366604039 => "Physics/{}.bphysics",
+                        _ => return Ok(()),
+                    }
+                    .replace("{}", &v);
+                    file_map.lock().unwrap().insert(
+                        ["Actor/", &param_path].join(""),
+                        path!(actor_dir / (param_path + ".yml")),
+                    );
+                    match k {
+                        110127898 => {
+                            // ASUser
+                            let aslist = self.parse_pio(&path!(
+                                actor_dir / "ASList" / format!("{}.baslist.yml", v)
+                            ))?;
+                            for anim in aslist.list("ASDefines").unwrap().objects.values() {
+                                if let Parameter::String64(filename) =
+                                    anim.param("Filename").unwrap()
+                                {
+                                    if filename == "Dummy" {
+                                        continue;
+                                    }
+                                    let as_path = format!("AS/{}.bas", filename);
+                                    file_map.lock().unwrap().insert(
+                                        ["Actor/", &as_path].join(""),
+                                        path!(actor_dir / (as_path + ".yml")),
+                                    );
                                 }
-                                let as_path = format!("AS/{}.bas", filename);
-                                file_map.insert(
-                                    format!("Actor/{}", &as_path),
-                                    path!(actor_dir / (as_path + ".yml")),
-                                );
                             }
                         }
-                    }
-                    1086735552 => {
-                        // AttentionUser
-                        let attcllist = self.parse_pio(&path!(
-                            actor_dir / "AttClientList" / format!("{}.batcllist.yml", v)
-                        ))?;
-                        for atcl in attcllist.list("AttClients").unwrap().objects.values() {
-                            if let Parameter::String64(filename) = atcl.param("FileName").unwrap() {
-                                if filename == "Dummy" {
-                                    continue;
+                        1086735552 => {
+                            // AttentionUser
+                            let attcllist = self.parse_pio(&path!(
+                                actor_dir / "AttClientList" / format!("{}.batcllist.yml", v)
+                            ))?;
+                            for atcl in attcllist.list("AttClients").unwrap().objects.values() {
+                                if let Parameter::String64(filename) =
+                                    atcl.param("FileName").unwrap()
+                                {
+                                    if filename == "Dummy" {
+                                        continue;
+                                    }
+                                    let atcl_path = format!("AttClient/{}.batcl", filename);
+                                    file_map.lock().unwrap().insert(
+                                        ["Actor/", &atcl_path].join(""),
+                                        path!(actor_dir / (atcl_path + ".yml")),
+                                    );
                                 }
-                                let atcl_path = format!("AttClient/{}.batcl", filename);
-                                file_map.insert(
-                                    format!("Actor/{}", &atcl_path),
-                                    path!(actor_dir / (atcl_path + ".yml")),
-                                );
                             }
                         }
-                    }
-                    4022948047 => {
-                        // RgConfigListUser
-                        let rglist = self.parse_pio(&path!(
-                            actor_dir / "RagdollConfigList" / format!("{}.brgconfiglist.yml", v)
-                        ))?;
-                        for impulse in rglist.list("ImpulseParamList").unwrap().objects.values() {
-                            if let Parameter::String64(filename) =
-                                impulse.param("FileName").unwrap()
+                        4022948047 => {
+                            // RgConfigListUser
+                            let rglist = self.parse_pio(&path!(
+                                actor_dir
+                                    / "RagdollConfigList"
+                                    / [v, ".brgconfiglist.yml"].join("")
+                            ))?;
+                            for impulse in rglist.list("ImpulseParamList").unwrap().objects.values()
                             {
-                                if filename == "Dummy" {
-                                    continue;
-                                }
-                                let impulse_path = format!("RagdollConfig/{}.brgconfig", filename);
-                                file_map.insert(
-                                    format!("Actor/{}", &impulse_path),
-                                    path!(actor_dir / (impulse_path + ".yml")),
-                                );
-                            }
-                        }
-                    }
-                    2366604039 => {
-                        // PhysicsUser
-                        let physics_source = path!(self.input / self.content / "Physics");
-                        let physics = self.parse_pio(&path!(
-                            actor_dir / "Physics" / format!("{}.bphysics.yml", v)
-                        ))?;
-                        let types = &physics
-                            .list("ParamSet")
-                            .ok_or_else(|| AampKeyError("ParamSet".to_owned()))?
-                            .objects
-                            .get(&1258832850u32)
-                            .ok_or_else(|| AampKeyError("1258832850".to_owned()))?;
-                        if let Parameter::Bool(use_ragdoll) = types.param("use_ragdoll").unwrap() {
-                            if *use_ragdoll {
-                                if let Parameter::String256(rg_path) = physics
-                                    .list("ParamSet")
-                                    .ok_or_else(|| AampKeyError("ParamSet".to_owned()))?
-                                    .object("Ragdoll")
-                                    .ok_or_else(|| AampKeyError("Ragdoll".to_owned()))?
-                                    .param("ragdoll_setup_file_path")
-                                    .ok_or_else(|| {
-                                        AampKeyError("ragdoll_setup_file_path".to_owned())
-                                    })?
+                                if let Parameter::String64(filename) =
+                                    impulse.param("FileName").unwrap()
                                 {
-                                    file_map.insert(
-                                        format!("Physics/Ragdoll/{}", &rg_path),
-                                        path!(physics_source / "Ragdoll" / &rg_path),
+                                    if filename == "Dummy" {
+                                        continue;
+                                    }
+                                    let impulse_path =
+                                        format!("RagdollConfig/{}.brgconfig", filename);
+                                    file_map.lock().unwrap().insert(
+                                        ["Actor/", &impulse_path].join(""),
+                                        path!(actor_dir / (impulse_path + ".yml")),
                                     );
                                 }
                             }
                         }
-                        if let Parameter::Bool(use_support) =
-                            types.param("use_support_bone").unwrap()
-                        {
-                            if *use_support {
-                                if let Parameter::String256(support_path) = physics
-                                    .list("ParamSet")
-                                    .ok_or_else(|| AampKeyError("ParamSet".to_owned()))?
-                                    .object("SupportBone")
-                                    .ok_or_else(|| AampKeyError("SupportBone".to_owned()))?
-                                    .param("support_bone_setup_file_path")
-                                    .ok_or_else(|| {
-                                        AampKeyError("support_bone_setup_file_path".to_owned())
-                                    })?
-                                {
-                                    file_map.insert(
-                                        format!("Physics/SupportBone/{}", &support_path),
-                                        path!(physics_source / "SupportBone" / &support_path),
-                                    );
-                                }
-                            }
-                        }
-                        if let Parameter::Bool(use_cloth) = types.param("use_cloth").unwrap() {
-                            if *use_cloth {
-                                if let Parameter::String256(cloth_path) = physics
-                                    .list("ParamSet")
-                                    .ok_or_else(|| AampKeyError("ParamSet".to_owned()))?
-                                    .list("Cloth")
-                                    .ok_or_else(|| AampKeyError("Cloth".to_owned()))?
-                                    .object("ClothHeader")
-                                    .ok_or_else(|| AampKeyError("ClothHeader".to_owned()))?
-                                    .param("cloth_setup_file_path")
-                                    .ok_or_else(|| {
-                                        AampKeyError("cloth_setup_file_path".to_owned())
-                                    })?
-                                {
-                                    file_map.insert(
-                                        format!("Physics/Cloth/{}", &cloth_path),
-                                        path!(physics_source / "Cloth" / &cloth_path),
-                                    );
-                                }
-                            }
-                        }
-                        if let Parameter::Int(rigid_num) =
-                            types.param("use_rigid_body_set_num").unwrap()
-                        {
-                            if *rigid_num > 0 {
-                                for rigid in physics
-                                    .list("ParamSet")
-                                    .ok_or_else(|| AampKeyError("ParamSet".to_owned()))?
-                                    .list("RigidBodySet")
-                                    .ok_or_else(|| AampKeyError("RigidBodySet".to_owned()))?
-                                    .lists
-                                    .values()
-                                {
-                                    if let Some(setup_path_param) = rigid
-                                        .objects
-                                        .get(&4288596824)
-                                        .ok_or_else(|| AampKeyError("4288596824".to_owned()))?
-                                        .param("setup_file_path")
+                        2366604039 => {
+                            // PhysicsUser
+                            let physics_source = path!(self.input / self.content / "Physics");
+                            let physics = self.parse_pio(&path!(
+                                actor_dir / "Physics" / [v, ".bphysics.yml"].join("")
+                            ))?;
+                            let types = &physics
+                                .list("ParamSet")
+                                .ok_or_else(|| AampKeyError("ParamSet".to_owned()))?
+                                .objects
+                                .get(&1258832850u32)
+                                .ok_or_else(|| AampKeyError("1258832850".to_owned()))?;
+                            if let Parameter::Bool(use_ragdoll) =
+                                types.param("use_ragdoll").unwrap()
+                            {
+                                if *use_ragdoll {
+                                    if let Parameter::String256(rg_path) = physics
+                                        .list("ParamSet")
+                                        .ok_or_else(|| AampKeyError("ParamSet".to_owned()))?
+                                        .object("Ragdoll")
+                                        .ok_or_else(|| AampKeyError("Ragdoll".to_owned()))?
+                                        .param("ragdoll_setup_file_path")
+                                        .ok_or_else(|| {
+                                            AampKeyError("ragdoll_setup_file_path".to_owned())
+                                        })?
                                     {
-                                        if let Parameter::String256(setup_path) = setup_path_param {
-                                            let setup_full_path =
-                                                path!(physics_source / "RigidBody" / setup_path);
-                                            if setup_full_path.exists() {
-                                                file_map.insert(
-                                                    format!("Physics/RigidBody/{}", &setup_path),
-                                                    path!(
-                                                        physics_source
-                                                            / "RigidBody"
-                                                            / &setup_full_path
-                                                    ),
+                                        file_map.lock().unwrap().insert(
+                                            ["Physics/Ragdoll/", &rg_path].join(""),
+                                            path!(physics_source / "Ragdoll" / &rg_path),
+                                        );
+                                    }
+                                }
+                            }
+                            if let Parameter::Bool(use_support) =
+                                types.param("use_support_bone").unwrap()
+                            {
+                                if *use_support {
+                                    if let Parameter::String256(support_path) = physics
+                                        .list("ParamSet")
+                                        .ok_or_else(|| AampKeyError("ParamSet".to_owned()))?
+                                        .object("SupportBone")
+                                        .ok_or_else(|| AampKeyError("SupportBone".to_owned()))?
+                                        .param("support_bone_setup_file_path")
+                                        .ok_or_else(|| {
+                                            AampKeyError("support_bone_setup_file_path".to_owned())
+                                        })?
+                                    {
+                                        file_map.lock().unwrap().insert(
+                                            ["Physics/SupportBone/", &support_path].join(""),
+                                            path!(physics_source / "SupportBone" / &support_path),
+                                        );
+                                    }
+                                }
+                            }
+                            if let Parameter::Bool(use_cloth) = types.param("use_cloth").unwrap() {
+                                if *use_cloth {
+                                    if let Parameter::String256(cloth_path) = physics
+                                        .list("ParamSet")
+                                        .ok_or_else(|| AampKeyError("ParamSet".to_owned()))?
+                                        .list("Cloth")
+                                        .ok_or_else(|| AampKeyError("Cloth".to_owned()))?
+                                        .object("ClothHeader")
+                                        .ok_or_else(|| AampKeyError("ClothHeader".to_owned()))?
+                                        .param("cloth_setup_file_path")
+                                        .ok_or_else(|| {
+                                            AampKeyError("cloth_setup_file_path".to_owned())
+                                        })?
+                                    {
+                                        file_map.lock().unwrap().insert(
+                                            ["Physics/Cloth/", &cloth_path].join(""),
+                                            path!(physics_source / "Cloth" / &cloth_path),
+                                        );
+                                    }
+                                }
+                            }
+                            if let Parameter::Int(rigid_num) =
+                                types.param("use_rigid_body_set_num").unwrap()
+                            {
+                                if *rigid_num > 0 {
+                                    for rigid in physics
+                                        .list("ParamSet")
+                                        .ok_or_else(|| AampKeyError("ParamSet".to_owned()))?
+                                        .list("RigidBodySet")
+                                        .ok_or_else(|| AampKeyError("RigidBodySet".to_owned()))?
+                                        .lists
+                                        .values()
+                                    {
+                                        if let Some(setup_path_param) = rigid
+                                            .objects
+                                            .get(&4288596824)
+                                            .ok_or_else(|| AampKeyError("4288596824".to_owned()))?
+                                            .param("setup_file_path")
+                                        {
+                                            if let Parameter::String256(setup_path) =
+                                                setup_path_param
+                                            {
+                                                let setup_full_path = path!(
+                                                    physics_source / "RigidBody" / setup_path
                                                 );
+                                                if setup_full_path.exists() {
+                                                    file_map.lock().unwrap().insert(
+                                                        ["Physics/RigidBody/", &setup_path]
+                                                            .join(""),
+                                                        path!(
+                                                            physics_source
+                                                                / "RigidBody"
+                                                                / &setup_full_path
+                                                        ),
+                                                    );
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
                         }
+                        _ => (),
                     }
-                    _ => (),
                 }
-            }
-        }
+                Ok(())
+            })
+            .collect::<GeneralResult<()>>()?;
+
+        let file_map = file_map.lock().unwrap().to_owned();
 
         if self.fresh_files.contains(&link)
-            || file_map.iter().any(|(_, v)| self.fresh_files.contains(&v))
+            || file_map
+                .par_iter()
+                .any(|(_, v)| self.fresh_files.contains(&v))
         {
             Ok(Some(Actor {
                 name: link
@@ -534,14 +545,15 @@ impl ModBuilder {
                     .unwrap()
                     .to_string_lossy()
                     .replace(".bxml", ""),
-                pack: SarcFile {
+                pack: sarc::SarcFile {
                     byte_order: if self.be {
                         sarc::Endian::Big
                     } else {
                         sarc::Endian::Little
                     },
                     files: file_map
-                        .iter()
+                        .par_iter()
+                        .filter(|(_, v)| self.fresh_files.contains(v))
                         .map(|(k, v)| -> GeneralResult<Option<SarcEntry>> {
                             let ext = &v.extension().unwrap().to_string_lossy();
                             let bytes = if ext == "yml" {
@@ -575,15 +587,14 @@ impl ModBuilder {
                                 }
                             } else {
                                 match fs::read(&v).map_err(|_| {
-                                    Box::<AnyError>::from(format!(
-                                        "Cannot read file {}",
-                                        v.to_string_lossy()
-                                    ))
+                                    Box::<AnyError>::from(
+                                        ["Cannot read file ", &v.to_string_lossy()].join(""),
+                                    )
                                 }) {
                                     Ok(data) => data,
                                     Err(e) => {
                                         if ext.starts_with("hk") {
-                                            self.warn(&format!("{:?}", e))?;
+                                            self.warn(e)?;
                                             return Ok(None);
                                         } else {
                                             return Err(e);
@@ -601,7 +612,8 @@ impl ModBuilder {
                             Err(e) => Some(Err(e)),
                         })
                         .collect::<GeneralResult<Vec<SarcEntry>>>()?,
-                },
+                }
+                .into(),
             }))
         } else {
             Ok(None)
@@ -610,17 +622,19 @@ impl ModBuilder {
 
     fn save_times(&mut self) -> GeneralResult<()> {
         let time = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)?
             .as_secs();
-        for file in &self.fresh_files {
-            self.file_times.insert(file.to_owned(), time);
-        }
+        self.file_times.extend(
+            self.fresh_files
+                .par_iter()
+                .map(|f| (f.to_owned(), time))
+                .collect::<HashMap<PathBuf, u64>>(),
+        );
         fs::write(
             path!(self.input / ".done"),
             &self
                 .file_times
-                .iter()
+                .par_iter()
                 .map(|(f, t)| {
                     format!(
                         "{},{}\n",
@@ -633,8 +647,7 @@ impl ModBuilder {
                     )
                 })
                 .collect::<String>(),
-        )
-        .unwrap();
+        )?;
         Ok(())
     }
 
@@ -722,12 +735,10 @@ impl ModBuilder {
                         }
                         actorlist.lock().unwrap().push(Byml::Hash(info));
                     }
-                    // let mut info: BTreeMap<String, Byml> = std::mem::take(&mut byml);
                     Ok(())
                 })
                 .collect::<GeneralResult<()>>()?;
             let mut actorlist = actorlist.lock().unwrap().to_owned();
-            // let mut hashlist: BTreeSet<u32> = BTreeSet::new();
             let hashlist: Arc<Mutex<BTreeSet<u32>>> = Arc::new(Mutex::new(BTreeSet::new()));
             actorlist.par_sort_by_key(|a| {
                 let name = a.as_hash().unwrap()["name"].as_string().unwrap();
@@ -770,7 +781,8 @@ impl ModBuilder {
     }
 
     fn build_actors(&mut self) -> GeneralResult<()> {
-        println!("Building actors...");
+        println!("Building {} total actors...", self.actors.len());
+        self.vprint(format!("{:?}", self.actors));
         self.actors
             .par_iter()
             .filter(|a| !self.titles.contains(&a.name))
@@ -782,9 +794,17 @@ impl ModBuilder {
                         / "Pack"
                         / format!("{}.sbactorpack", &a.name)
                 );
+                let mut sf: SarcFile;
+                let pack: &SarcFile = if out.exists() {
+                    sf = SarcFile::read_from_file(&out).map_err(box_any_error)?;
+                    sf.add_entries(&a.pack.files);
+                    &sf
+                } else {
+                    &a.pack
+                };
                 fs::create_dir_all(out.parent().unwrap())?;
-                write_yaz0_sarc_to_file(&a.pack, &out).map_err(|e| {
-                    Box::<AnyError>::from(format!("Error {:?} writing actor pack {}", e, &a.name))
+                write_yaz0_sarc_to_file(&pack, &out).map_err(|e| {
+                    box_any_error(format!("Error {:?} writing actor pack {}", e, &a.name))
                 })?;
                 Ok(())
             })
@@ -796,28 +816,38 @@ impl ModBuilder {
             .filter(|a| self.titles.contains(&a.name))
             .collect();
         if !title_actors.is_empty() {
+            self.vprint(format!("Building {} TitleBG actors...", title_actors.len()));
             let title_path = path!(&self.output / &self.content / "Pack" / "TitleBG.pack");
-            let mut sarc = if title_path.exists() {
+            let mut sarc: SarcFile = if title_path.exists() {
                 SarcFile::read_from_file(&title_path).map_err(box_any_error)?
             } else {
-                SarcFile {
-                    byte_order: if self.be {
-                        sarc::Endian::Big
-                    } else {
-                        sarc::Endian::Little
-                    },
-                    files: vec![],
-                }
+                SarcFile::new(if self.be {
+                    sarc::Endian::Big
+                } else {
+                    sarc::Endian::Little
+                })
             };
             sarc.add_entries(
                 &title_actors
                     .into_par_iter()
                     .map(|a| {
                         self.vprint(format!("Building actor {}", &a.name));
+                        let file_path = format!("Actor/Pack/{}.sbactorpack", a.name);
                         let mut tmp: Vec<u8> = vec![];
-                        a.pack.write(&mut tmp).map_err(box_any_error)?;
+                        let mut sf: SarcFile;
+                        let pack: &SarcFile = if let Some(entry) = sarc.get_file(file_path.as_str())
+                        {
+                            sf = sarc::SarcFile::read(entry.data.as_slice())
+                                .map_err(box_any_error)?
+                                .into();
+                            sf.add_entries(&a.pack.files);
+                            &sf
+                        } else {
+                            &a.pack
+                        };
+                        pack.write(&mut tmp).map_err(box_any_error)?;
                         let actor = SarcEntry {
-                            name: Some(format!("Actor/Pack/{}.sbactorpack", a.name)),
+                            name: Some(file_path),
                             data: compress(tmp.as_slice()),
                         };
                         self.vprint(format!("Built actor {}", &a.name));
@@ -825,8 +855,11 @@ impl ModBuilder {
                     })
                     .collect::<GeneralResult<Vec<SarcEntry>>>()?,
             );
+            self.vprint("Saving TitleBG actors...");
             fs::create_dir_all(title_path.parent().unwrap())?;
-            sarc.write_to_file(&title_path).map_err(box_any_error)?;
+            fs::remove_file(&title_path).unwrap_or_else(|_| ());
+            sarc.0.write_to_file(&title_path).map_err(box_any_error)?;
+            self.vprint("Finished all actors");
         }
         Ok(())
     }
@@ -894,13 +927,10 @@ impl ModBuilder {
                 if !self.fresh_files.contains(&item) {
                     continue;
                 }
+                let mut store_path = item.strip_prefix(root).unwrap().to_owned();
                 let bytes = if &item.extension().unwrap().to_string_lossy() == "yml" {
-                    let sub_ext = dot_ext(
-                        item.with_extension("")
-                            .extension()
-                            .unwrap()
-                            .to_string_lossy(),
-                    );
+                    store_path = store_path.with_extension("");
+                    let sub_ext = dot_ext(store_path.extension().unwrap().to_string_lossy());
                     if AAMP_EXTS.contains(&sub_ext.as_str()) {
                         ParameterIO::from_text(&fs::read_to_string(&item).unwrap())
                             .unwrap()
@@ -928,11 +958,11 @@ impl ModBuilder {
                 } else {
                     fs::read(&item)?
                 };
-                sarc.add_file(item.strip_prefix(root)?.to_slash_lossy().as_str(), &bytes);
+                sarc.add_file(store_path.to_slash_lossy().as_str(), &bytes);
             } else if item.is_dir() {
                 if let Some(ext) = item.extension() {
                     if SARC_EXTS.contains(&dot_ext(ext.to_string_lossy()).as_str()) {
-                        let name: String = item.strip_prefix(root)?.to_slash_lossy().into();
+                        let name: String = item.strip_prefix(root)?.to_slash_lossy();
                         sarc.add_file(
                             name.as_str(),
                             self.build_sarc(
@@ -942,16 +972,15 @@ impl ModBuilder {
                                     .par_iter()
                                     .find_first(|e| e.name == Some(name.clone()))
                                 {
-                                    SarcFile::read(&entry.data).map_err(box_any_error)?
+                                    sarc::SarcFile::read(&entry.data)
+                                        .map_err(box_any_error)?
+                                        .into()
                                 } else {
-                                    SarcFile {
-                                        byte_order: if self.be {
-                                            sarc::Endian::Big
-                                        } else {
-                                            sarc::Endian::Little
-                                        },
-                                        files: vec![],
-                                    }
+                                    SarcFile::new(if self.be {
+                                        sarc::Endian::Big
+                                    } else {
+                                        sarc::Endian::Little
+                                    })
                                 },
                             )?
                             .as_slice(),
@@ -1016,14 +1045,11 @@ impl ModBuilder {
                     self.build_sarc(
                         f,
                         if !out.exists() {
-                            SarcFile {
-                                byte_order: if self.be {
-                                    sarc::Endian::Big
-                                } else {
-                                    sarc::Endian::Little
-                                },
-                                files: vec![],
-                            }
+                            SarcFile::new(if self.be {
+                                sarc::Endian::Big
+                            } else {
+                                sarc::Endian::Little
+                            })
                         } else {
                             SarcFile::read_from_file(&out).map_err(box_any_error)?
                         },
@@ -1143,4 +1169,39 @@ fn write_yaz0_sarc_to_file<P: AsRef<Path>>(sarc: &SarcFile, path: P) -> GeneralR
 #[inline(always)]
 fn box_any_error<D: std::fmt::Debug>(error: D) -> Box<AnyError> {
     Box::<AnyError>::from(format!("{:?}", error).trim_matches('"'))
+}
+
+#[cfg(test)]
+mod test {
+    use crate::sarc_ext::{SarcFile, SarcFileExt};
+    use aamp::ParameterIO;
+    use std::fs;
+    #[test]
+    fn partial_build() {
+        let mut titlebg = SarcFile::read_from_file("/home/nicenenerd/git/Hyrule-Builder/test/hyrule_rebalance_v7_unbuilt/build/content/Pack/TitleBG.pack").unwrap();
+        println!("Read TitleBG");
+        let player = titlebg
+            .get_file("Actor/Pack/GameROMPlayer.sbactorpack")
+            .unwrap();
+        let mut player_pack: SarcFile =
+            sarc::SarcFile::read(player.data.as_slice()).unwrap().into();
+        println!("Loaded player actor pack");
+        player_pack.add_file(
+            "Actor/AIProgram/Player_Link.baiprog", 
+            &ParameterIO::from_text(
+                fs::read_to_string("/home/nicenenerd/git/Hyrule-Builder/test/hyrule_rebalance_v7_unbuilt/content/Actor/AIProgram/Player_Link.baiprog.yml")
+                .unwrap()
+                .as_str()
+            )
+            .unwrap()
+            .to_binary()
+            .unwrap());
+        println!("Updated AI program");
+        let mut bytes: Vec<u8> = vec![];
+        player_pack.write_yaz0(&mut bytes).unwrap();
+        titlebg.add_file("Actor/Pack/GameROMPlayer.sbactorpack", bytes.as_slice());
+        println!("Saved player actor pack");
+        titlebg.write_to_file("/home/nicenenerd/git/Hyrule-Builder/test/hyrule_rebalance_v7_unbuilt/build/content/Pack/TitleBG.pack").unwrap();
+        println!("Done");
+    }
 }
