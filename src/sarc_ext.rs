@@ -55,24 +55,21 @@ impl SarcFileExt for SarcFile {
         Ok(sarc::SarcFile::read_from_file(file)?.into())
     }
 
+    #[inline]
     fn get_file(&self, path: &str) -> Option<&SarcEntry> {
         self.files
             .par_iter()
-            .find_first(|x| x.name == Some(path.to_owned()))
+            .find_first(|x| x.name.is_some() && x.name.as_ref().unwrap() == path)
     }
 
     fn add_file(&mut self, path: &str, data: &[u8]) {
-        if let Some(file) = self.get_file(path) {
-            let pos = self
-                .files
-                .par_iter()
-                .position_first(|x| x.name == file.name)
-                .unwrap();
-            self.files.remove(pos);
+        if self.get_file(path).is_some() {
+            self.files
+                .retain(|x| x.name.is_none() || x.name.as_ref().unwrap() != path);
         };
         self.files.push(SarcEntry {
             name: Some(path.to_owned()),
-            data: data.to_vec(),
+            data: data.to_owned(),
         })
     }
 
