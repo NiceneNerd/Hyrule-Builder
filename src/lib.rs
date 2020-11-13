@@ -1,8 +1,9 @@
 #![allow(clippy::unreadable_literal)]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 mod sarc_ext;
 use aamp::*;
 use botw_utils::extensions::*;
-// use botw_utils::hashes::{Platform, StockHashTable};
 use byml::Byml;
 use crc::crc32;
 use glob::glob;
@@ -24,7 +25,7 @@ use yaz0::Yaz0Writer;
 
 type AnyError = dyn Error + Send + Sync;
 type GeneralResult<T> = Result<T, Box<AnyError>>;
-const COMPRESS: yaz0::CompressionLevel = yaz0::CompressionLevel::Lookahead { quality: 10 };
+const COMPRESS: yaz0::CompressionLevel = yaz0::CompressionLevel::Lookahead { quality: 6 };
 
 static TITLE_ACTORS: [&str; 58] = [
     "AncientArrow",
@@ -724,16 +725,16 @@ impl ModBuilder {
                     if let Byml::Hash(mut info) =
                         Byml::from_text(&fs::read_to_string(&f)?).map_err(box_any_error)?
                     {
-                        let actor_name = info["name"].as_string()?.clone();
-                        if modded_actors.contains(&actor_name) {
-                            info.extend(
-                                self.actors
-                                    .iter()
-                                    .find(|a| a.name == actor_name)
-                                    .expect("Weird")
-                                    .get_info(),
-                            )
-                        }
+                        // let actor_name = info["name"].as_string()?.clone();
+                        // if modded_actors.contains(&actor_name) {
+                        //     info.extend(
+                        //         self.actors
+                        //             .iter()
+                        //             .find(|a| a.name == actor_name)
+                        //             .expect("Weird")
+                        //             .get_info(),
+                        //     )
+                        // }
                         actorlist.lock().unwrap().push(Byml::Hash(info));
                     }
                     Ok(())
