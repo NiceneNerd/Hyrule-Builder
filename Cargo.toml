@@ -26,3 +26,6 @@ yaz0 = { git = "https://github.com/NiceneNerd/yaz0-rs", version = "0.1.2" }
 [dependencies.pyo3]
 version = "0.12.3"
 features = ["extension-module"]
+
+[profile.release]
+lto = true
