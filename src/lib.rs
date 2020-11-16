@@ -306,11 +306,11 @@ impl ModBuilder {
     fn parse_actor(&self, link: &PathBuf) -> GeneralResult<Option<Actor>> {
         let yml = fs::read_to_string(link)?;
         let pio: ParameterIO = ParameterIO::from_text(&yml).map_err(box_any_error)?;
-        let file_map: Arc<Mutex<HashMap<String, PathBuf>>> = Arc::new(Mutex::new(HashMap::new()));
+        let mut file_map: HashMap<String, PathBuf> = HashMap::new();
         pio.object("LinkTarget")
             .ok_or(format!("No LinkTarget found in {:?}", link))?
             .params()
-            .par_iter()
+            .iter()
             .try_for_each(|(k, v)| -> GeneralResult<()> {
                 if let Parameter::StringRef(v) = v {
                     if v == "Dummy" {
@@ -340,7 +340,7 @@ impl ModBuilder {
                         _ => return Ok(()),
                     }
                     .replace("{}", &v);
-                    file_map.lock().unwrap().insert(
+                    file_map.insert(
                         ["Actor/", &param_path].join(""),
                         path!(&self.actor_dir / (param_path + ".yml")),
                     );
@@ -358,7 +358,7 @@ impl ModBuilder {
                                         continue;
                                     }
                                     let as_path = ["AS/", filename, ".bas"].join("");
-                                    file_map.lock().unwrap().insert(
+                                    file_map.insert(
                                         ["Actor/", &as_path].join(""),
                                         path!(&self.actor_dir / (as_path + ".yml")),
                                     );
@@ -378,7 +378,7 @@ impl ModBuilder {
                                         continue;
                                     }
                                     let atcl_path = ["AttClient/", filename, ".batcl"].join("");
-                                    file_map.lock().unwrap().insert(
+                                    file_map.insert(
                                         ["Actor/", &atcl_path].join(""),
                                         path!(&self.actor_dir / (atcl_path + ".yml")),
                                     );
@@ -402,7 +402,7 @@ impl ModBuilder {
                                     }
                                     let impulse_path =
                                         ["RagdollConfig/", filename, ".brgconfig"].join("");
-                                    file_map.lock().unwrap().insert(
+                                    file_map.insert(
                                         ["Actor/", &impulse_path].join(""),
                                         path!(&self.actor_dir / (impulse_path + ".yml")),
                                     );
@@ -435,7 +435,7 @@ impl ModBuilder {
                                             AampKeyError("ragdoll_setup_file_path".to_owned())
                                         })?
                                     {
-                                        file_map.lock().unwrap().insert(
+                                        file_map.insert(
                                             ["Physics/Ragdoll/", &rg_path].join(""),
                                             path!(physics_source / "Ragdoll" / &rg_path),
                                         );
@@ -456,7 +456,7 @@ impl ModBuilder {
                                             AampKeyError("support_bone_setup_file_path".to_owned())
                                         })?
                                     {
-                                        file_map.lock().unwrap().insert(
+                                        file_map.insert(
                                             ["Physics/SupportBone/", &support_path].join(""),
                                             path!(physics_source / "SupportBone" / &support_path),
                                         );
@@ -477,7 +477,7 @@ impl ModBuilder {
                                             AampKeyError("cloth_setup_file_path".to_owned())
                                         })?
                                     {
-                                        file_map.lock().unwrap().insert(
+                                        file_map.insert(
                                             ["Physics/Cloth/", &cloth_path].join(""),
                                             path!(physics_source / "Cloth" / &cloth_path),
                                         );
@@ -509,7 +509,7 @@ impl ModBuilder {
                                                     physics_source / "RigidBody" / setup_path
                                                 );
                                                 if setup_full_path.exists() {
-                                                    file_map.lock().unwrap().insert(
+                                                    file_map.insert(
                                                         ["Physics/RigidBody/", &setup_path]
                                                             .join(""),
                                                         path!(
@@ -530,8 +530,6 @@ impl ModBuilder {
                 }
                 Ok(())
             })?;
-
-        let file_map = file_map.lock().unwrap().to_owned();
 
         if self.fresh_files.contains(&link)
             || file_map
