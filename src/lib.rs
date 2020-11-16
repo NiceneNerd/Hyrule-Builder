@@ -2,7 +2,6 @@
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 mod sarc_ext;
-mod yaz;
 use aamp::*;
 use botw_utils::extensions::*;
 use byml::Byml;
@@ -23,7 +22,6 @@ use std::fs;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use yaz::compress;
 use yaz0::Yaz0Writer;
 
 type AnyError = dyn Error + Send + Sync;
@@ -313,7 +311,7 @@ impl ModBuilder {
             .ok_or(format!("No LinkTarget found in {:?}", link))?
             .params()
             .par_iter()
-            .map(|(k, v)| -> GeneralResult<()> {
+            .try_for_each(|(k, v)| -> GeneralResult<()> {
                 if let Parameter::StringRef(v) = v {
                     if v == "Dummy" {
                         return Ok(());
@@ -531,8 +529,7 @@ impl ModBuilder {
                     }
                 }
                 Ok(())
-            })
-            .collect::<GeneralResult<()>>()?;
+            })?;
 
         let file_map = file_map.lock().unwrap().to_owned();
 
@@ -773,21 +770,20 @@ impl ModBuilder {
             let mut writer = BufWriter::new(fs::File::create(path!(
                 &self.output / &self.content / "Actor" / "ActorInfo.product.sbyml"
             ))?);
-            writer.write_all(&compress(Byml::Hash(actorinfo).to_binary(
+            writer.write_all(&Byml::Hash(actorinfo).to_compressed_binary(
                 if self.be {
                     byml::Endian::Big
                 } else {
                     byml::Endian::Little
                 },
                 2,
-            )?)?)?;
+            )?)?;
         }
         Ok(())
     }
 
     fn build_actors(&mut self) -> GeneralResult<()> {
         println!("Loading actors to build...");
-        let title_actors: Arc<Mutex<Vec<Actor>>> = Arc::new(Mutex::new(vec![]));
         let actors = glob(
             &path!(self.input / self.content / "Actor" / "ActorLink" / "*.bxml.yml")
                 .to_str()
@@ -796,10 +792,10 @@ impl ModBuilder {
         .expect("Weird, a glob error")
         .filter_map(|f| f.ok())
         .collect::<Vec<PathBuf>>()
-        .par_iter()
+        .into_par_iter()
         .filter_map(|f| {
             if f.to_str().unwrap().contains("ActorLink") {
-                self.parse_actor(f).transpose()
+                self.parse_actor(&f).transpose()
             } else {
                 None
             }
@@ -808,16 +804,15 @@ impl ModBuilder {
         if actors.is_empty() {
             return Ok(());
         }
-
         println!("Building {} total actors...", actors.len());
         let actor_pack_dir = path!(&self.output / &self.content / "Actor" / "Pack");
         fs::create_dir_all(&actor_pack_dir)?;
-
+        let title_actors: Arc<Mutex<Vec<Actor>>> = Arc::new(Mutex::new(vec![]));
         // let actorinfo = Arc::new(Mutex::new(&mut self.actor_info));
         let titles = Arc::new(&self.titles);
         actors
             .into_par_iter()
-            .map(|a| {
+            .try_for_each(|a| -> GeneralResult<()> {
                 // actorinfo
                 //     .lock()
                 //     .unwrap()
@@ -843,8 +838,7 @@ impl ModBuilder {
                     write_yaz0_sarc_to_file(pack, out)?;
                 }
                 Ok(())
-            })
-            .collect::<GeneralResult<()>>()?;
+            })?;
 
         let title_actors = title_actors.lock().unwrap();
         if !title_actors.is_empty() {
@@ -907,7 +901,7 @@ impl ModBuilder {
                     && !(f.ancestors().map(|p| p.to_owned()).any(|x| x == actorpath)
                         || f.file_name().unwrap().to_str().unwrap() == "config.yml")
             })
-            .map(|f| {
+            .try_for_each(|f| -> GeneralResult<()> {
                 self.vprint(format!("Building {}", f.to_slash_lossy()));
                 let ext = dot_ext(f);
                 let out = path!(&self.output / f.strip_prefix(&self.input)?.with_extension(""));
@@ -937,8 +931,7 @@ impl ModBuilder {
                         .map_err(box_any_error)?;
                 }
                 Ok(())
-            })
-            .collect::<GeneralResult<()>>()?;
+            })?;
         Ok(())
     }
 
@@ -1067,7 +1060,7 @@ impl ModBuilder {
         println!("Building SARCs...");
         sarcs
             .into_par_iter()
-            .map(|f| {
+            .try_for_each(|f| -> GeneralResult<()> {
                 let out = path!(&self.output / f.strip_prefix(&self.input)?);
                 let data = self.build_sarc(
                     &f,
@@ -1083,13 +1076,15 @@ impl ModBuilder {
                         })?
                     },
                 )?;
+                if data.is_empty() {
+                    return Ok(());
+                }
                 fs::create_dir_all(out.parent().unwrap())?;
                 let mut writer = BufWriter::new(fs::File::create(&out)?);
                 writer.write_all(&data)?;
                 writer.flush()?;
                 Ok(())
-            })
-            .collect::<GeneralResult<()>>()?;
+            })?;
 
         self.other_files.retain(|f| nest_level(f) < 1);
         self.yml_files.retain(|f| nest_level(f) < 1);
@@ -1108,7 +1103,7 @@ impl ModBuilder {
             println!("Copying miscellaneous files...");
             self.other_files
                 .par_iter()
-                .map(|f| {
+                .try_for_each(|f| -> GeneralResult<()> {
                     if self.fresh_files.contains(f) {
                         let out = path!(&self.output / f.strip_prefix(&self.input).unwrap());
                         fs::create_dir_all(out.parent().unwrap())?;
@@ -1118,8 +1113,7 @@ impl ModBuilder {
                     } else {
                         Ok(())
                     }
-                })
-                .collect::<GeneralResult<()>>()?;
+                })?;
         }
 
         if !self.meta.is_empty()
@@ -1190,13 +1184,13 @@ fn dot_ext<P: AsRef<Path>>(file: P) -> String {
     .join("")
 }
 
-// #[inline]
-// fn compress<B: AsRef<[u8]>>(data: B) -> Vec<u8> {
-//     let mut bytes: Vec<u8> = vec![];
-//     let ywrite = Yaz0Writer::new(&mut bytes);
-//     ywrite.compress_and_write(data.as_ref(), COMPRESS).unwrap();
-//     bytes
-// }
+#[inline]
+fn compress<B: AsRef<[u8]>>(data: B) -> GeneralResult<Vec<u8>> {
+    let mut bytes: Vec<u8> = vec![];
+    let ywrite = Yaz0Writer::new(&mut bytes);
+    ywrite.compress_and_write(data.as_ref(), COMPRESS)?;
+    Ok(bytes)
+}
 
 fn write_yaz0_sarc_to_file<P: AsRef<Path>>(sarc: &SarcFile, path: P) -> GeneralResult<()> {
     let mut bwriter = BufWriter::new(fs::File::create(path.as_ref())?);
@@ -1252,7 +1246,11 @@ mod tests {
             no_rstb: false,
             content: "content".to_owned(),
             aoc: "aoc".to_owned(),
-            titles: crate::TITLE_ACTORS.iter().map(|x| x.to_string()).collect(),
+            titles: crate::TITLE_ACTORS
+                .iter()
+                .map(|x| x.to_string())
+                .chain(vec!["BluntArrow".to_owned()].into_iter())
+                .collect(),
             file_times,
             fresh_files: vec![],
             all_files: vec![],

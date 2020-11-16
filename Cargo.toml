@@ -9,7 +9,7 @@ name = "hyrule_builder"
 crate-type = ["cdylib"]
 
 [dependencies]
-aamp = { path = "../aamp", version = "0.1.1" }
+aamp = { path = "../aamp-rust" }
 byml = "0.1.4"
 botw-utils = "0.2.0"
 chrono = "0.4"
@@ -22,6 +22,8 @@ sarc = "1.1.3"
 path_macro = "1.0.0"
 path-slash = "0.1.3"
 yaz0 = { git = "https://github.com/NiceneNerd/yaz0-rs" }
+
+[dev-dependencies]
 
 [dependencies.pyo3]
 version = "0.12.3"
