@@ -9,7 +9,7 @@ name = "hyrule_builder"
 crate-type = ["cdylib"]
 
 [dependencies]
-aamp = "0.1.1"
+aamp = { path = "../aamp", version = "0.1.1" }
 byml = "0.1.4"
 botw-utils = "0.2.0"
 chrono = "0.4"

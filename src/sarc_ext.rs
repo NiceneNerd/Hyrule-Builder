@@ -38,6 +38,7 @@ impl From<sarc::SarcFile> for SarcFile {
 pub trait SarcFileExt {
     fn new(byte_order: sarc::Endian) -> Self;
     fn get_file(&self, path: &str) -> Option<&SarcEntry>;
+    fn get_file_mut(&mut self, path: &str) -> Option<&mut SarcEntry>;
     fn add_file(&mut self, path: &str, data: &[u8]);
     fn add_entries(&mut self, entries: &[SarcEntry]);
     fn read_from_file<P: AsRef<std::path::Path>>(file: P) -> Result<SarcFile, sarc::parser::Error>;
@@ -62,15 +63,22 @@ impl SarcFileExt for SarcFile {
             .find_first(|x| x.name.is_some() && x.name.as_ref().unwrap() == path)
     }
 
+    #[inline]
+    fn get_file_mut(&mut self, path: &str) -> Option<&mut SarcEntry> {
+        self.files
+            .par_iter_mut()
+            .find_first(|x| x.name.is_some() && x.name.as_ref().unwrap() == path)
+    }
+
     fn add_file(&mut self, path: &str, data: &[u8]) {
-        if self.get_file(path).is_some() {
-            self.files
-                .retain(|x| x.name.is_none() || x.name.as_ref().unwrap() != path);
-        };
-        self.files.push(SarcEntry {
-            name: Some(path.to_owned()),
-            data: data.to_owned(),
-        })
+        if let Some(entry) = self.get_file_mut(path) {
+            entry.data = data.to_owned()
+        } else {
+            self.files.push(SarcEntry {
+                name: Some(path.to_owned()),
+                data: data.to_owned(),
+            })
+        }
     }
 
     fn add_entries(&mut self, entries: &[SarcEntry]) {
