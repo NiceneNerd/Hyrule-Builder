@@ -554,10 +554,8 @@ class ModBuilder:
                 print("Building MSBT files...")
             for d in msg_dirs:
                 msg_dir = next(d.glob("Message/*"))
-                new_dir = self.out / msg_dir.relative_to(self.mod).with_suffix(
-                    ".ssarc.ssarc"
-                )
-                pymsyt.create(msg_dir, new_dir)
+                new_dir = self.out / msg_dir.relative_to(self.mod).with_suffix(".ssarc")
+                pymsyt.create(str(msg_dir), self.be, output=str(new_dir))
 
         print("Building AAMP and BYML files...")
         if self.single or len(yml_files) < 2:

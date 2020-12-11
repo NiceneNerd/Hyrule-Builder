@@ -190,9 +190,9 @@ def _unbuild_sarc(
             osf.write_bytes(sarc_file.data)
 
     if "Msg_" in output.name:
-        pymsyt.export(output, output)
-        rmtree(output)
-        output.with_suffix("").rename(output)
+        pymsyt.export(str(output), str(output))
+        for file in output.rglob("**/*.msbt"):
+            file.unlink()
     if output.suffix in {".ssarc", ".sarc"}:
         (output / ".align").write_text(str(s.guess_min_alignment()))
     return names
