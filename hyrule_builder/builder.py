@@ -172,7 +172,7 @@ class ModBuilder:
         if not file:
             ver = "wiiu" if self.be else "switch"
             file = EXEC_DIR / "data" / ver / "rstb.json"
-        ref_contents = json.loads(file.read_text(), encoding="utf-8")
+        ref_contents = json.loads(file.read_text(encoding="utf-8"))
 
         def parse_hash(file: str) -> int:
             try:
