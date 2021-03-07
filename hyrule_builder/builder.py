@@ -681,11 +681,11 @@ class ModBuilder:
                 rules.write(
                     "titleIds = 00050000101C9300,00050000101C9400,00050000101C9500\n"
                 )
-                for key, val in meta.items():
+                for key, val in self.meta.items():
                     rules.write(f"{key} = {val}\n")
-                if "path" not in meta and "name" in meta:
+                if "path" not in self.meta and "name" in self.meta:
                     rules.write(
-                        f"path = The Legend of Zelda: Breath of the Wild/Mods/{meta['name']}\n"
+                        f"path = The Legend of Zelda: Breath of the Wild/Mods/{self.meta['name']}\n"
                     )
                 rules.write("version = 4\n")
 
