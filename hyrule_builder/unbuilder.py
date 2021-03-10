@@ -129,12 +129,14 @@ def _unbuild_actorpack(s: oead.Sarc, output: Path):
             out.write_bytes(_aamp_to_yml(f.data))
         elif f.data[0:2] in [b"BY", b"YB"]:
             out.write_bytes(_byml_to_yml(f.data))
-    for f in {
-        f for f in s.get_files() if "Physics" in f.name and "Actor" not in f.name
-    }:
+    for f in {f for f in s.get_files() if "Physics" in f.name and "Actor" not in f.name}:
         out = output / f.name
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_bytes(f.data)
+        if f.data[0:4] == b"AAMP":
+            out = (output / f.name).with_suffix(f"{Path(f.name).suffix}.yml")
+            out.write_bytes(_aamp_to_yml(f.data))
+        else:
+            out.write_bytes(f.data)
     return {f.name for f in s.get_files()}
 
 
