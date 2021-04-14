@@ -115,6 +115,24 @@ def _should_rstb(f: Path) -> bool:
     f = f.with_suffix(f.suffix.replace(".s", "."))
     return f.suffix not in RSTB_EXCLUDE_EXTS and f.name not in RSTB_EXCLUDE_NAMES
 
+def load_rstb(be: bool, file: Path = None) -> ResourceSizeTable:
+    table = ResourceSizeTable(b"", be)
+    if not file:
+        ver = "wiiu" if be else "switch"
+        file = EXEC_DIR / "data" / ver / "rstb.json"
+    ref_contents = json.loads(file.read_text(encoding="utf-8"))
+
+    def parse_hash(file: str) -> int:
+        try:
+            return int(file)
+        except ValueError:
+            return crc32(file.encode("utf8"))
+
+    table.crc32_map = {
+        parse_hash(k): v for k, v in ref_contents["hash_map"].items()
+    }
+    table.name_map = {k: v for k, v in ref_contents["name_map"].items()}
+    return table
 
 class ModBuilder:
     mod: Path
@@ -168,23 +186,7 @@ class ModBuilder:
             print(f"WARNING: {msg}")
 
     def load_rstb(self, file: Path = None) -> ResourceSizeTable:
-        table = ResourceSizeTable(b"", be=self.be)
-        if not file:
-            ver = "wiiu" if self.be else "switch"
-            file = EXEC_DIR / "data" / ver / "rstb.json"
-        ref_contents = json.loads(file.read_text(encoding="utf-8"))
-
-        def parse_hash(file: str) -> int:
-            try:
-                return int(file)
-            except ValueError:
-                return crc32(file.encode("utf8"))
-
-        table.crc32_map = {
-            parse_hash(k): v for k, v in ref_contents["hash_map"].items()
-        }
-        table.name_map = {k: v for k, v in ref_contents["name_map"].items()}
-        return table
+        return load_rstb(self.be, file)
 
     def _get_rstb_val(self, name: str, data: bytes) -> int:
         ext = name[name.rindex(".") :]
@@ -678,15 +680,12 @@ class ModBuilder:
         if self.meta:
             with (self.out / "rules.txt").open("w", encoding="utf-8") as rules:
                 rules.write("[Definition]\n")
-                rules.write(
-                    "titleIds = 00050000101C9300,00050000101C9400,00050000101C9500\n"
-                )
+                if "path" not in self.meta and "name" in self.meta:
+                    self.meta["path"] = f"The Legend of Zelda: Breath of the Wild/Mods/{self.meta['name']}"
+                if "titleIds" not in self.meta:
+                    self.meta["titleIds"] = "00050000101C9300,00050000101C9400,00050000101C9500"
                 for key, val in self.meta.items():
                     rules.write(f"{key} = {val}\n")
-                if "path" not in self.meta and "name" in self.meta:
-                    rules.write(
-                        f"path = The Legend of Zelda: Breath of the Wild/Mods/{self.meta['name']}\n"
-                    )
                 rules.write("version = 4\n")
 
 
