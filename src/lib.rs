@@ -3,6 +3,7 @@
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 mod sarc_ext;
 use aamp::*;
+use anyhow::{format_err, Context, Error, Result};
 use botw_utils::extensions::*;
 use byml::Byml;
 use crc::crc32;
@@ -14,18 +15,16 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3::wrap_pyfunction;
 use rayon::prelude::*;
-use sarc::SarcEntry;
-use sarc_ext::{SarcFile, SarcFileExt};
+// use sarc::SarcEntry;
+// use sarc_ext::{SarcFile, SarcFileExt};
+use sarc_rs::{Endian, File, Sarc, SarcWriter};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::error::Error;
 use std::fs;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use yaz0::Yaz0Writer;
 
-type AnyError = dyn Error + Send + Sync;
-type GeneralResult<T> = Result<T, Box<AnyError>>;
 const COMPRESS: yaz0::CompressionLevel = yaz0::CompressionLevel::Lookahead { quality: 6 };
 
 static TITLE_ACTORS: [&str; 58] = [
@@ -95,7 +94,7 @@ struct AampKeyError(String);
 unsafe impl Send for AampKeyError {}
 unsafe impl Sync for AampKeyError {}
 
-impl Error for AampKeyError {}
+impl std::error::Error for AampKeyError {}
 
 impl std::fmt::Display for AampKeyError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -136,7 +135,7 @@ pub struct BuildArgs {
 #[derive(Debug)]
 struct Actor {
     pub name: String,
-    pub pack: SarcFile,
+    pub pack: SarcWriter,
 }
 
 // impl Actor {
@@ -260,9 +259,9 @@ pub struct ModBuilder {
 
 impl ModBuilder {
     #[inline]
-    fn warn<S: std::fmt::Display + std::fmt::Debug>(&self, msg: S) -> GeneralResult<()> {
+    fn warn(&self, msg: Error) -> Result<()> {
         if self.strict {
-            Err(box_any_error(msg))
+            Err(msg)
         } else {
             if self.warn {
                 println!("{}", msg);
@@ -279,39 +278,27 @@ impl ModBuilder {
     }
 
     #[inline]
-    fn parse_pio(&self, file: &PathBuf) -> GeneralResult<ParameterIO> {
+    fn parse_pio(&self, file: &PathBuf) -> Result<ParameterIO> {
         match file.extension().unwrap().to_str().unwrap() {
-            "yml" => match ParameterIO::from_text(&fs::read_to_string(file)?) {
-                Ok(pio) => Ok(pio),
-                Err(e) => Err(Box::from(format!(
-                    "Could not parse {}, error {:?}",
-                    file.to_str().unwrap(),
-                    e
-                ))),
-            },
+            "yml" => ParameterIO::from_text(&fs::read_to_string(file)?)
+                .with_context(|| format!("Failed to parse {}", file.to_str().unwrap())),
             _ => {
                 let mut fo = fs::File::open(file)?;
-                match ParameterIO::from_binary(&mut fo) {
-                    Ok(pio) => Ok(pio),
-                    Err(e) => Err(Box::from(format!(
-                        "Could not parse {}, error {:?}",
-                        file.to_str().unwrap(),
-                        e
-                    ))),
-                }
+                ParameterIO::from_binary(&mut fo)
+                    .with_context(|| format!("Failed to parse {}", file.to_str().unwrap()))
             }
         }
     }
 
-    fn parse_actor(&self, link: &PathBuf) -> GeneralResult<Option<Actor>> {
+    fn parse_actor(&self, link: &PathBuf) -> Result<Option<Actor>> {
         let yml = fs::read_to_string(link)?;
-        let pio: ParameterIO = ParameterIO::from_text(&yml).map_err(box_any_error)?;
+        let pio: ParameterIO = ParameterIO::from_text(&yml)?;
         let mut file_map: HashMap<String, PathBuf> = HashMap::new();
         pio.object("LinkTarget")
-            .ok_or(format!("No LinkTarget found in {:?}", link))?
+            .ok_or(format_err!("No LinkTarget found in {:?}", link))?
             .params()
             .iter()
-            .try_for_each(|(k, v)| -> GeneralResult<()> {
+            .try_for_each(|(k, v)| -> Result<()> {
                 if let Parameter::StringRef(v) = v {
                     if v == "Dummy" {
                         return Ok(());
@@ -543,82 +530,76 @@ impl ModBuilder {
                     .to_str()
                     .unwrap()
                     .replace(".bxml", ""),
-                pack: sarc::SarcFile {
-                    byte_order: if self.be {
-                        sarc::Endian::Big
-                    } else {
-                        sarc::Endian::Little
-                    },
-                    files: file_map
-                        .par_iter()
-                        .filter(|(_, v)| self.fresh_files.contains(v))
-                        .map(|(k, v)| -> GeneralResult<Option<SarcEntry>> {
-                            let ext = v.extension().unwrap().to_str().unwrap();
-                            let bytes = if ext == "yml" {
-                                let sub_ext: &str = v
-                                    .file_stem()
-                                    .unwrap()
-                                    .to_str()
-                                    .unwrap()
-                                    .split('.')
-                                    .last()
-                                    .unwrap();
-                                if ["baniminfo", "baischedule"].contains(&sub_ext) {
-                                    Byml::from_text(&fs::read_to_string(&v).unwrap())
+                pack: {
+                    let mut sarc =
+                        SarcWriter::new(if self.be { Endian::Big } else { Endian::Little });
+                    sarc.files.extend(
+                        file_map
+                            .par_iter()
+                            .filter(|(_, v)| self.fresh_files.contains(v))
+                            .map(|(k, v)| {
+                                let ext = v.extension().unwrap().to_str().unwrap();
+                                let bytes = if ext == "yml" {
+                                    let sub_ext: &str = v
+                                        .file_stem()
                                         .unwrap()
-                                        .to_binary(
-                                            if self.be {
-                                                byml::Endian::Big
-                                            } else {
-                                                byml::Endian::Little
-                                            },
-                                            2,
-                                        )
+                                        .to_str()
                                         .unwrap()
-                                } else if sub_ext.starts_with('b') {
-                                    ParameterIO::from_text(&fs::read_to_string(&v).unwrap())
-                                        .unwrap()
-                                        .to_binary()
-                                        .unwrap()
+                                        .split('.')
+                                        .last()
+                                        .unwrap();
+                                    if ["baniminfo", "baischedule"].contains(&sub_ext) {
+                                        Byml::from_text(&fs::read_to_string(&v).unwrap())
+                                            .unwrap()
+                                            .to_binary(
+                                                if self.be {
+                                                    byml::Endian::Big
+                                                } else {
+                                                    byml::Endian::Little
+                                                },
+                                                2,
+                                            )
+                                            .unwrap()
+                                    } else if sub_ext.starts_with('b') {
+                                        ParameterIO::from_text(&fs::read_to_string(&v).unwrap())
+                                            .unwrap()
+                                            .to_binary()
+                                            .unwrap()
+                                    } else {
+                                        fs::read(&v).unwrap()
+                                    }
                                 } else {
-                                    fs::read(&v).unwrap()
-                                }
-                            } else {
-                                match fs::read(&v).map_err(|_| {
-                                    Box::<AnyError>::from(
-                                        ["Cannot read file ", &v.to_str().unwrap()].join(""),
-                                    )
-                                }) {
-                                    Ok(data) => data,
-                                    Err(e) => {
-                                        if ext.starts_with("hk") {
-                                            self.warn(e)?;
-                                            return Ok(None);
-                                        } else {
-                                            return Err(e);
+                                    match fs::read(&v).with_context(|| {
+                                        ["Cannot read file ", &v.to_str().unwrap()].join("")
+                                    }) {
+                                        Ok(data) => data,
+                                        Err(e) => {
+                                            if ext.starts_with("hk") {
+                                                self.warn(e)?;
+                                                return Ok(None);
+                                            } else {
+                                                return Err(e);
+                                            }
                                         }
                                     }
-                                }
-                            };
-                            Ok(Some(SarcEntry {
-                                name: Some(k.to_owned()),
-                                data: bytes,
-                            }))
-                        })
-                        .filter_map(|f| match f {
-                            Ok(_) => f.transpose(),
-                            Err(e) => Some(Err(e)),
-                        })
-                        .collect::<GeneralResult<Vec<SarcEntry>>>()?,
-                }
-                .into(),
+                                };
+                                Ok(Some((k.to_owned(), bytes)))
+                            })
+                            .filter_map(|f| match f {
+                                Ok(_) => f.transpose(),
+                                Err(e) => Some(Err(e)),
+                            })
+                            .collect::<Result<Vec<_>>>()?,
+                    );
+                    sarc
+                },
             }))
         } else {
             Ok(None)
         }
     }
 
-    fn save_times(&mut self) -> GeneralResult<()> {
+    fn save_times(&mut self) -> Result<()> {
         let time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_secs();
@@ -650,7 +631,7 @@ impl ModBuilder {
         Ok(())
     }
 
-    fn sort_files(&mut self) -> GeneralResult<()> {
+    fn sort_files(&mut self) -> Result<()> {
         self.all_files = glob(&path!(self.input / "**" / "*.*").to_str().unwrap())
             .expect("Weird, a glob error")
             .filter_map(|x| {
@@ -691,13 +672,13 @@ impl ModBuilder {
             self.other_files.push(file.to_owned());
         }
         if self.fresh_files.is_empty() {
-            Err(box_any_error("No files need building"))
+            Err(anyhow::format_err!("No files need building"))
         } else {
             Ok(())
         }
     }
 
-    fn build_actorinfo(&mut self) -> GeneralResult<()> {
+    fn build_actorinfo(&mut self) -> Result<()> {
         let actorinfo_dir = path!(&self.input / &self.content / "Actor" / "ActorInfo");
         let is_info = |f: &PathBuf| {
             f.file_name()
@@ -717,7 +698,7 @@ impl ModBuilder {
                 .filter_map(|f| f.ok())
                 .collect::<Vec<PathBuf>>()
                 .par_iter()
-                .map(|f| -> GeneralResult<Byml> {
+                .map(|f| -> Result<Byml> {
                     match Byml::from_text(&fs::read_to_string(f)?) {
                         Ok(mut info) => {
                             if let Some(gen_info) = gen_infos
@@ -735,10 +716,10 @@ impl ModBuilder {
                             }
                             Ok(info)
                         }
-                        Err(e) => Err(box_any_error(e)),
+                        Err(e) => Err(format_err!("{:?}", e)),
                     }
                 })
-                .collect::<GeneralResult<Vec<Byml>>>()?;
+                .collect::<Result<Vec<Byml>>>()?;
             let hashlist: Arc<Mutex<BTreeSet<u32>>> = Arc::new(Mutex::new(BTreeSet::new()));
             actorlist.par_sort_by_key(|a| {
                 let name = a.as_hash().unwrap()["name"].as_string().unwrap();
@@ -780,7 +761,7 @@ impl ModBuilder {
         Ok(())
     }
 
-    fn build_actors(&mut self) -> GeneralResult<()> {
+    fn build_actors(&mut self) -> Result<()> {
         println!("Loading actors to build...");
         let actors = glob(
             &path!(self.input / self.content / "Actor" / "ActorLink" / "*.bxml.yml")
@@ -798,7 +779,7 @@ impl ModBuilder {
                 None
             }
         })
-        .collect::<GeneralResult<Vec<Actor>>>()?;
+        .collect::<Result<Vec<Actor>>>()?;
         if actors.is_empty() {
             return Ok(());
         }
@@ -808,85 +789,74 @@ impl ModBuilder {
         let title_actors: Arc<Mutex<Vec<Actor>>> = Arc::new(Mutex::new(vec![]));
         // let actorinfo = Arc::new(Mutex::new(&mut self.actor_info));
         let titles = Arc::new(&self.titles);
-        actors
-            .into_par_iter()
-            .try_for_each(|a| -> GeneralResult<()> {
-                // actorinfo
-                //     .lock()
-                //     .unwrap()
-                //     .insert(a.name.to_owned(), Byml::Hash(a.get_info()));
-                if titles.contains(&a.name) {
-                    title_actors.lock().unwrap().push(a);
+        actors.into_par_iter().try_for_each(|a| -> Result<()> {
+            // actorinfo
+            //     .lock()
+            //     .unwrap()
+            //     .insert(a.name.to_owned(), Byml::Hash(a.get_info()));
+            if titles.contains(&a.name) {
+                title_actors.lock().unwrap().push(a);
+            } else {
+                let out = path!(&actor_pack_dir / [&a.name, ".sbactorpack"].join(""));
+                let mut pack: SarcWriter = if out.exists() {
+                    let data = std::fs::read(&out)?;
+                    let sarc_file = Sarc::new(&data)?;
+                    let mut pack = SarcWriter::from_sarc(&sarc_file);
+                    pack.files.extend(a.pack.files.into_iter());
+                    pack
                 } else {
-                    let out = path!(&actor_pack_dir / [&a.name, ".sbactorpack"].join(""));
-                    let mut sf: SarcFile;
-                    let pack: &SarcFile = if out.exists() {
-                        sf = SarcFile::read_from_file(&out).map_err(|e| {
-                            Box::<AnyError>::from(format!(
-                                "Failed to read SARC \"{}\", error: {:?}",
-                                out.to_str().unwrap(),
-                                e
-                            ))
-                        })?;
-                        sf.add_entries(&a.pack.files);
-                        &sf
-                    } else {
-                        &a.pack
-                    };
-                    write_yaz0_sarc_to_file(pack, out)?;
-                }
-                Ok(())
-            })?;
+                    a.pack
+                };
+                write_yaz0_sarc_to_file(&mut pack, out)?;
+            }
+            Ok(())
+        })?;
 
-        let title_actors = title_actors.lock().unwrap();
+        let mut title_actors: Vec<Actor> = Arc::try_unwrap(title_actors).unwrap().into_inner().unwrap();
         if !title_actors.is_empty() {
             self.vprint(format!("Building {} TitleBG actors...", title_actors.len()));
             let title_path = path!(&self.output / &self.content / "Pack" / "TitleBG.pack");
-            let mut sarc: SarcFile = if title_path.exists() {
-                SarcFile::read_from_file(&title_path).map_err(box_any_error)?
+            let mut sarc: SarcWriter = if title_path.exists() {
+                let data = std::fs::read(&title_path)?;
+                let sarc_file = Sarc::new(&data)?;
+                SarcWriter::from_sarc(&sarc_file)
             } else {
-                SarcFile::new(if self.be {
-                    sarc::Endian::Big
-                } else {
-                    sarc::Endian::Little
-                })
+                SarcWriter::new(if self.be { Endian::Big } else { Endian::Little })
             };
-            sarc.add_entries(
-                &title_actors
-                    .par_iter()
+            sarc.files.extend(
+                title_actors
+                    .into_par_iter()
                     .map(|a| {
-                        self.vprint(format!("Building actor {}", &a.name));
+                        let name = a.name.clone();
+                        self.vprint(format!("Building actor {}", &name));
                         let file_path = ["Actor/Pack/", a.name.as_str(), ".sbactorpack"].join("");
-                        let mut tmp: Vec<u8> = vec![];
-                        let mut sf: SarcFile;
-                        let pack: &SarcFile = if let Some(entry) = sarc.get_file(file_path.as_str())
-                        {
-                            sf = sarc::SarcFile::read(&entry.data)
-                                .map_err(box_any_error)?
-                                .into();
-                            sf.add_entries(&a.pack.files);
-                            &sf
-                        } else {
-                            &a.pack
-                        };
-                        pack.write(&mut tmp).map_err(box_any_error)?;
-                        let actor = SarcEntry {
-                            name: Some(file_path),
-                            data: compress(&tmp)?,
-                        };
+                        let mut pack: SarcWriter =
+                            if let Some(entry) = sarc.files.get(file_path.as_str()) {
+                                let sarc = Sarc::new(&entry)?;
+                                let mut pack = SarcWriter::from_sarc(&sarc);
+                                pack.files.extend(a.pack.files.into_iter());
+                                pack
+                            } else {
+                                a.pack
+                            };
+                        let tmp = pack.write_to_bytes().with_context(|| {
+                            format!("Failed to create actor pack data for {}", name)
+                        })?;
+                        let actor = (file_path, compress(&tmp)?);
                         self.vprint(format!("Built actor {}", &a.name));
                         Ok(actor)
                     })
-                    .collect::<GeneralResult<Vec<SarcEntry>>>()?,
+                    .collect::<Result<Vec<_>>>()?,
             );
             fs::create_dir_all(title_path.parent().unwrap())?;
-            sarc.write_to_file(title_path)?;
+            sarc.write(&mut BufWriter::new(fs::File::create(&title_path)?))
+                .context("Failed to save TitleBG.pack")?;
             self.vprint("Finished all actors");
         }
         Ok(())
     }
 
-    fn build_yaml(&mut self) -> GeneralResult<()> {
+    fn build_yaml(&mut self) -> Result<()> {
         if self.yml_files.is_empty() {
             return Ok(());
         }
@@ -899,16 +869,26 @@ impl ModBuilder {
                     && !(f.ancestors().map(|p| p.to_owned()).any(|x| x == actorpath)
                         || f.file_name().unwrap().to_str().unwrap() == "config.yml")
             })
-            .try_for_each(|f| -> GeneralResult<()> {
+            .try_for_each(|f| -> Result<()> {
                 self.vprint(format!("Building {}", f.to_slash_lossy()));
-                let ext = dot_ext(f);
+                let ext = get_ext(f);
                 let out = path!(&self.output / f.strip_prefix(&self.input)?.with_extension(""));
                 if !out.parent().unwrap().exists() {
-                    fs::create_dir_all(out.parent().unwrap())?;
+                    fs::create_dir_all(out.parent().unwrap()).with_context(|| {
+                        format!(
+                            "Failed to create folder {:?}, parent of {:?}",
+                            out.parent().unwrap(),
+                            &out
+                        )
+                    })?;
                 }
-                if BYML_EXTS.contains(&ext.as_str()) {
-                    let byml = Byml::from_text(&fs::read_to_string(&f)?).map_err(box_any_error)?;
-                    let mut writer = BufWriter::new(fs::File::create(out)?);
+                if BYML_EXTS.contains(&ext) {
+                    let byml = Byml::from_text(&fs::read_to_string(&f)?)
+                        .map_err(|e| format_err!("{:?}", e))?;
+                    let mut writer = BufWriter::new(
+                        fs::File::create(&out)
+                            .with_context(|| format!("Failed to create file {:?}", out))?,
+                    );
                     let data = byml.to_binary(
                         if self.be {
                             byml::Endian::Big
@@ -923,10 +903,11 @@ impl ModBuilder {
                         data
                     })?;
                     writer.flush()?;
-                } else if AAMP_EXTS.contains(&ext.as_str()) {
-                    self.parse_pio(&f)?
-                        .write_binary(&mut fs::File::create(out)?)
-                        .map_err(box_any_error)?;
+                } else if AAMP_EXTS.contains(&ext) {
+                    self.parse_pio(&f)?.write_binary(
+                        &mut fs::File::create(&out)
+                            .with_context(|| format!("Failed to create file {:?}", out))?,
+                    )?;
                 }
                 Ok(())
             })?;
@@ -937,8 +918,8 @@ impl ModBuilder {
         &self,
         root: &PathBuf,
         dir: &PathBuf,
-        sarc: &mut SarcFile,
-    ) -> GeneralResult<()> {
+        sarc: &mut SarcWriter,
+    ) -> Result<()> {
         for item in glob(path!(dir / "*").to_str().unwrap().as_ref())
             .expect("Weird, a glob error")
             .filter_map(|f| f.ok())
@@ -950,13 +931,13 @@ impl ModBuilder {
                 let mut store_path = item.strip_prefix(root).unwrap().to_owned();
                 let bytes = if item.extension().unwrap().to_str().unwrap() == "yml" {
                     store_path = store_path.with_extension("");
-                    let sub_ext = dot_ext(&item);
-                    if AAMP_EXTS.contains(&sub_ext.as_str()) {
+                    let sub_ext = get_ext(&item);
+                    if AAMP_EXTS.contains(&sub_ext) {
                         ParameterIO::from_text(&fs::read_to_string(&item).unwrap())
                             .unwrap()
                             .to_binary()
                             .unwrap()
-                    } else if BYML_EXTS.contains(&sub_ext.as_str()) {
+                    } else if BYML_EXTS.contains(&sub_ext) {
                         let data = Byml::from_text(&fs::read_to_string(&item).unwrap())
                             .unwrap()
                             .to_binary(
@@ -978,31 +959,30 @@ impl ModBuilder {
                 } else {
                     fs::read(&item)?
                 };
-                sarc.add_file(store_path.to_slash_lossy().as_str(), &bytes);
+                sarc.files.insert(store_path.to_slash_lossy(), bytes);
             } else if item.is_dir() {
                 if let Some(ext) = item.extension() {
                     if SARC_EXTS.contains(&[".", ext.to_str().unwrap()].join("").as_str()) {
                         let name: String = item.strip_prefix(root)?.to_slash_lossy();
-                        sarc.add_file(
-                            name.as_str(),
-                            &self.build_sarc(
-                                &item,
-                                if let Some(entry) = sarc
-                                    .files
-                                    .par_iter()
-                                    .find_first(|e| e.name == Some(name.clone()))
-                                {
-                                    sarc::SarcFile::read(&entry.data)
-                                        .map_err(box_any_error)?
-                                        .into()
+                        let val = self.build_sarc(
+                            &item,
+                            if let Some(entry) =
+                                sarc.files.par_iter().find_first(|e| e.0 == &name)
+                            {
+                                SarcWriter::from_sarc(&Sarc::new(entry.1).with_context(
+                                    || format!("Failed to read SARC {:?}", entry.0),
+                                )?)
+                            } else {
+                                SarcWriter::new(if self.be {
+                                    Endian::Big
                                 } else {
-                                    SarcFile::new(if self.be {
-                                        sarc::Endian::Big
-                                    } else {
-                                        sarc::Endian::Little
-                                    })
-                                },
-                            )?,
+                                    Endian::Little
+                                })
+                            },
+                        )?;
+                        sarc.files.insert(
+                            name,
+                            val,
                         );
                         continue;
                     }
@@ -1013,14 +993,13 @@ impl ModBuilder {
         Ok(())
     }
 
-    fn build_sarc(&self, f: &PathBuf, mut sarc: SarcFile) -> GeneralResult<Vec<u8>> {
+    fn build_sarc(&self, f: &PathBuf, mut sarc: SarcWriter) -> Result<Vec<u8>> {
         self.vprint(format!("Building {}", f.to_slash_lossy()));
         self.add_folder_to_sarc(f, f, &mut sarc)?;
         if sarc.files.is_empty() {
             return Ok(vec![]);
         }
-        let mut data: Vec<u8> = vec![];
-        sarc.write(&mut data)?;
+        let mut data: Vec<u8> = sarc.write_to_bytes()?;
         let ext = f.extension().unwrap().to_str().unwrap();
         if ext.starts_with(".s") && ext != "sarc" {
             Ok(compress(&data)?)
@@ -1029,7 +1008,7 @@ impl ModBuilder {
         }
     }
 
-    fn build_sarcs(&mut self) -> GeneralResult<()> {
+    fn build_sarcs(&mut self) -> Result<()> {
         println!("Loading SARCs to build...");
         let sarcs = glob(path!(&self.input / "**" / "*").to_str().unwrap())
             .expect("Weird, a glob error")
@@ -1040,7 +1019,7 @@ impl ModBuilder {
                         && nest_level(&path) == 0
                     {
                         if let Some(ext) = path.extension() {
-                            if SARC_EXTS.contains(&[".", ext.to_str().unwrap()].join("").as_str())
+                            if SARC_EXTS.contains(&ext.to_str().unwrap())
                                 && self.fresh_files.par_iter().any(|f| f.starts_with(&path))
                             {
                                 return Some(path);
@@ -1056,40 +1035,35 @@ impl ModBuilder {
             return Ok(());
         }
         println!("Building SARCs...");
-        sarcs
-            .into_par_iter()
-            .try_for_each(|f| -> GeneralResult<()> {
-                let out = path!(&self.output / f.strip_prefix(&self.input)?);
-                let data = self.build_sarc(
+        sarcs.into_par_iter().try_for_each(|f| -> Result<()> {
+            let out = path!(&self.output / f.strip_prefix(&self.input)?);
+            let data =
+                self.build_sarc(
                     &f,
                     if !out.exists() {
-                        SarcFile::new(if self.be {
-                            sarc::Endian::Big
-                        } else {
-                            sarc::Endian::Little
-                        })
+                        SarcWriter::new(if self.be { Endian::Big } else { Endian::Little })
                     } else {
-                        SarcFile::read_from_file(&out).map_err(|_| {
-                            box_any_error(format!("Failed to read SARC {}", f.to_str().unwrap()))
-                        })?
+                        SarcWriter::from_sarc(&Sarc::new(&std::fs::read(&out)?).with_context(
+                            || format!("Failed to read SARC {}", f.to_str().unwrap()),
+                        )?)
                     },
                 )?;
-                if data.is_empty() {
-                    return Ok(());
-                }
-                fs::create_dir_all(out.parent().unwrap())?;
-                let mut writer = BufWriter::new(fs::File::create(&out)?);
-                writer.write_all(&data)?;
-                writer.flush()?;
-                Ok(())
-            })?;
+            if data.is_empty() {
+                return Ok(());
+            }
+            fs::create_dir_all(out.parent().unwrap())?;
+            let mut writer = BufWriter::new(fs::File::create(&out)?);
+            writer.write_all(&data)?;
+            writer.flush()?;
+            Ok(())
+        })?;
 
-        self.other_files.retain(|f| nest_level(f) < 1);
-        self.yml_files.retain(|f| nest_level(f) < 1);
+        self.other_files.retain(|f| nest_level(f) == 0);
+        self.yml_files.retain(|f| nest_level(f) == 0);
         Ok(())
     }
 
-    fn build(&mut self) -> GeneralResult<()> {
+    fn build(&mut self) -> Result<()> {
         self.sort_files()?;
 
         self.build_actors()?;
@@ -1101,12 +1075,12 @@ impl ModBuilder {
             println!("Copying miscellaneous files...");
             self.other_files
                 .par_iter()
-                .try_for_each(|f| -> GeneralResult<()> {
+                .try_for_each(|f| -> Result<()> {
                     if self.fresh_files.contains(f) {
                         let out = path!(&self.output / f.strip_prefix(&self.input).unwrap());
                         fs::create_dir_all(out.parent().unwrap())?;
                         fs::copy(f, out)
-                            .map_err(|e| Box::from(format!("{:?} at {:?}", e, f)))
+                            .map_err(|e| format_err!("{:?} at {:?}", e, f))
                             .map(|_| ())
                     } else {
                         Ok(())
@@ -1158,7 +1132,7 @@ fn nest_level<P: AsRef<Path>>(file: P) -> usize {
                 return false;
             }
             if let Some(ext) = d.extension() {
-                SARC_EXTS.contains(&[".", ext.to_str().unwrap()].join("").as_str())
+                SARC_EXTS.contains(&ext.to_str().unwrap())
             } else {
                 false
             }
@@ -1167,44 +1141,25 @@ fn nest_level<P: AsRef<Path>>(file: P) -> usize {
 }
 
 #[inline]
-fn dot_ext<P: AsRef<Path>>(file: P) -> String {
-    [
-        ".",
-        file.as_ref()
-            .file_stem()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .split('.')
-            .last()
-            .unwrap(),
-    ]
-    .join("")
+fn get_ext<'a>(file: &'a Path) -> &'a str {
+    file.extension().unwrap().to_str().unwrap()
 }
 
 #[inline]
-fn compress<B: AsRef<[u8]>>(data: B) -> GeneralResult<Vec<u8>> {
+fn compress<B: AsRef<[u8]>>(data: B) -> Result<Vec<u8>> {
     let mut bytes: Vec<u8> = vec![];
     let ywrite = Yaz0Writer::new(&mut bytes);
     ywrite.compress_and_write(data.as_ref(), COMPRESS)?;
     Ok(bytes)
 }
 
-fn write_yaz0_sarc_to_file<P: AsRef<Path>>(sarc: &SarcFile, path: P) -> GeneralResult<()> {
+fn write_yaz0_sarc_to_file<P: AsRef<Path>>(sarc: &mut SarcWriter, path: P) -> Result<()> {
     let mut bwriter = BufWriter::new(fs::File::create(path.as_ref())?);
     let writer = Yaz0Writer::new(&mut bwriter);
-    let mut temp = vec![];
-    sarc.write(&mut temp)?;
-    writer
-        .compress_and_write(&temp, COMPRESS)
-        .map_err(box_any_error)?;
+    let tmp = sarc.write_to_bytes()?;
+    writer.compress_and_write(&tmp, COMPRESS)?;
     bwriter.flush()?;
     Ok(())
-}
-
-#[inline]
-fn box_any_error<D: std::fmt::Debug>(error: D) -> Box<AnyError> {
-    Box::<AnyError>::from(format!("{:?}", error).trim_matches('"'))
 }
 
 #[cfg(test)]
@@ -1216,7 +1171,7 @@ mod tests {
     #[test]
     fn build_sw() {
         let mut file_times: HashMap<PathBuf, u64> = HashMap::new();
-        let done_path = PathBuf::from("test/Second-Wind-WiiU-master/.done");
+        let done_path = PathBuf::from("test/Second-Wind-WiiU/.done");
         if done_path.exists() {
             for line in fs::read_to_string(done_path)
                 .unwrap()
@@ -1225,15 +1180,15 @@ mod tests {
             {
                 let data: Vec<&str> = line.split(',').collect();
                 file_times.insert(
-                    PathBuf::from(["test/Second-Wind-WiiU-master/", data[0]].join("")),
+                    PathBuf::from(["test/Second-Wind-WiiU/", data[0]].join("")),
                     str::parse::<u64>(data[1]).unwrap(),
                 );
             }
         };
         ModBuilder {
-            input: PathBuf::from("test/Second-Wind-WiiU-master"),
-            output: PathBuf::from("test/Second-Wind-WiiU-master/build"),
-            actor_dir: PathBuf::from("test/Second-Wind-WiiU-master/content/Actor"),
+            input: PathBuf::from("test/Second-Wind-WiiU"),
+            output: PathBuf::from("test/Second-Wind-WiiU/build"),
+            actor_dir: PathBuf::from("test/Second-Wind-WiiU/content/Actor"),
             actor_info: HashMap::new(),
             meta: HashMap::new(),
             be: true,
