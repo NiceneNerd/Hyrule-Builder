@@ -1,6 +1,6 @@
 #![allow(clippy::unreadable_literal)]
-#[global_allocator]
-static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+// #[global_allocator]
+// static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 mod sarc_ext;
 use aamp::*;
 use anyhow::{format_err, Context, Error, Result};
@@ -17,13 +17,16 @@ use pyo3::wrap_pyfunction;
 use rayon::prelude::*;
 // use sarc::SarcEntry;
 // use sarc_ext::{SarcFile, SarcFileExt};
-use sarc_rs::{Endian, File, Sarc, SarcWriter};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use sarc_rs::{Endian, Sarc, SarcWriter};
 use std::fs;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use yaz0::Yaz0Writer;
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    io::Cursor,
+};
+use yaz0::{Yaz0Archive, Yaz0Writer};
 
 const COMPRESS: yaz0::CompressionLevel = yaz0::CompressionLevel::Lookahead { quality: 6 };
 
@@ -132,6 +135,24 @@ pub struct BuildArgs {
     title_actors: String,
 }
 
+fn get_canon_name<P: AsRef<Path>>(file: P) -> Option<String> {
+    let file = file.as_ref();
+    if let Some(parent) = file.ancestors().find(|d| {
+        if let Some(ext) = d.extension() {
+            if SARC_EXTS.contains(&ext.to_str().unwrap()) {
+                return true;
+            }
+        }
+        false
+    }) {
+        Some(botw_utils::get_canon_name_without_root(
+            file.strip_prefix(&parent).unwrap(),
+        ))
+    } else {
+        botw_utils::get_canon_name(&file)
+    }
+}
+
 #[derive(Debug)]
 struct Actor {
     pub name: String,
@@ -223,6 +244,7 @@ pub fn build_mod(args: BuildArgs, meta: &PyDict) -> PyResult<()> {
         fresh_files: vec![],
         all_files: vec![],
         yml_files: vec![],
+        compiled_yml: HashMap::new(),
         other_files: vec![],
     };
     match builder.build() {
@@ -254,6 +276,7 @@ pub struct ModBuilder {
     fresh_files: Vec<PathBuf>,
     all_files: Vec<PathBuf>,
     yml_files: Vec<PathBuf>,
+    compiled_yml: HashMap<String, Vec<u8>>,
     other_files: Vec<PathBuf>,
 }
 
@@ -279,20 +302,25 @@ impl ModBuilder {
 
     #[inline]
     fn parse_pio(&self, file: &PathBuf) -> Result<ParameterIO> {
-        match file.extension().unwrap().to_str().unwrap() {
-            "yml" => ParameterIO::from_text(&fs::read_to_string(file)?)
-                .with_context(|| format!("Failed to parse {}", file.to_str().unwrap())),
-            _ => {
-                let mut fo = fs::File::open(file)?;
-                ParameterIO::from_binary(&mut fo)
-                    .with_context(|| format!("Failed to parse {}", file.to_str().unwrap()))
-            }
-        }
+        Ok(ParameterIO::from_binary(&mut Cursor::new(
+            self.compiled_yml
+                .get(
+                    &get_canon_name(
+                        &file
+                            .strip_prefix(&self.input)?
+                            .with_extension("")
+                            .to_slash_lossy(),
+                    )
+                    .unwrap(),
+                )
+                .ok_or_else(|| format_err!("Failed to get bytes for {:?}", &file))?,
+        ))?)
     }
 
     fn parse_actor(&self, link: &PathBuf) -> Result<Option<Actor>> {
-        let yml = fs::read_to_string(link)?;
-        let pio: ParameterIO = ParameterIO::from_text(&yml)?;
+        let pio: ParameterIO = self
+            .parse_pio(&link)
+            .with_context(|| format!("Failed to parse actor link {:?}", link))?;
         let mut file_map: HashMap<String, PathBuf> = HashMap::new();
         pio.object("LinkTarget")
             .ok_or(format_err!("No LinkTarget found in {:?}", link))?
@@ -550,7 +578,13 @@ impl ModBuilder {
                                         .unwrap();
                                     if ["baniminfo", "baischedule"].contains(&sub_ext) {
                                         Byml::from_text(&fs::read_to_string(&v).unwrap())
-                                            .unwrap()
+                                            .map_err(|e| {
+                                                format_err!(
+                                                    "Could not barse BYML file {:?}: {:?}",
+                                                    v,
+                                                    e
+                                                )
+                                            })?
                                             .to_binary(
                                                 if self.be {
                                                     byml::Endian::Big
@@ -561,8 +595,10 @@ impl ModBuilder {
                                             )
                                             .unwrap()
                                     } else if sub_ext.starts_with('b') {
-                                        ParameterIO::from_text(&fs::read_to_string(&v).unwrap())
-                                            .unwrap()
+                                        self.parse_pio(&v)
+                                            .with_context(|| {
+                                                format!("Failed to parse AAMP file {:?}", v)
+                                            })?
                                             .to_binary()
                                             .unwrap()
                                     } else {
@@ -632,6 +668,8 @@ impl ModBuilder {
     }
 
     fn sort_files(&mut self) -> Result<()> {
+        println!("Scanning project files...");
+        let mut yml_files: Vec<PathBuf> = vec![];
         self.all_files = glob(&path!(self.input / "**" / "*.*").to_str().unwrap())
             .expect("Weird, a glob error")
             .filter_map(|x| {
@@ -664,8 +702,9 @@ impl ModBuilder {
                 self.fresh_files.push(file.to_owned());
             }
             if let Some(ext) = file.extension() {
-                if ext.to_str().unwrap() == "yml" {
-                    self.yml_files.push(file.to_owned());
+                let ext = ext.to_str().unwrap();
+                if ext == "yml" || ext == "msyt" {
+                    yml_files.push(file.to_owned());
                     continue;
                 }
             }
@@ -674,6 +713,87 @@ impl ModBuilder {
         if self.fresh_files.is_empty() {
             Err(anyhow::format_err!("No files need building"))
         } else {
+            println!("Compiling {} YAML files...", yml_files.len());
+            let input = self.input.clone();
+            self.yml_files = yml_files.clone();
+            self.compiled_yml.par_extend(
+                yml_files
+                    .into_par_iter()
+                    .filter(|f| self.fresh_files.contains(f))
+                    .map(|f| -> Result<Option<(String, Vec<u8>)>> {
+                        if let Some(ext) = f.with_extension("").extension() {
+                            let ext = ext.to_str().unwrap();
+                            if BYML_EXTS.contains(&ext) {
+                                let byml =
+                                    Byml::from_text(&fs::read_to_string(&f)?).map_err(|e| {
+                                        format_err!("Failed to parse BYML file {:?}: {:?}", f, e)
+                                    })?;
+                                let data = if !ext.starts_with("s") {
+                                    byml.to_binary(
+                                        if self.be {
+                                            byml::Endian::Big
+                                        } else {
+                                            byml::Endian::Little
+                                        },
+                                        2,
+                                    )?
+                                } else {
+                                    compress(byml.to_binary(
+                                        if self.be {
+                                            byml::Endian::Big
+                                        } else {
+                                            byml::Endian::Little
+                                        },
+                                        2,
+                                    )?)?
+                                };
+                                Ok(Some((
+                                    get_canon_name(
+                                        f.with_extension("").strip_prefix(&input)?.to_slash_lossy(),
+                                    )
+                                    .unwrap(),
+                                    data,
+                                )))
+                            } else if AAMP_EXTS.contains(&ext) {
+                                let pio = ParameterIO::from_text(&fs::read_to_string(&f)?)
+                                    .with_context(|| {
+                                        format!("Failed to parse AAMP file {:?}", &f)
+                                    })?;
+                                Ok(Some((
+                                    get_canon_name(
+                                        f.with_extension("").strip_prefix(&input)?.to_slash_lossy(),
+                                    )
+                                    .unwrap(),
+                                    if ext.starts_with("s") {
+                                        compress(pio.to_binary()?)?
+                                    } else {
+                                        pio.to_binary()?
+                                    },
+                                )))
+                            } else {
+                                Ok(None)
+                            }
+                        } else if f.extension().unwrap() == "msyt" {
+                            let msyt: msyt::Msyt = serde_yaml::from_str(&fs::read_to_string(&f)?)?;
+                            Ok(Some((
+                                f.strip_prefix(f.parent().unwrap().parent().unwrap())
+                                    .unwrap()
+                                    .to_slash_lossy(),
+                                msyt.into_msbt_bytes(if self.be {
+                                    msyt::Endianness::Big
+                                } else {
+                                    msyt::Endianness::Little
+                                })
+                                .map_err(|_| format_err!("Failed to parse MSBT file {:?}", &f))?,
+                            )))
+                        } else {
+                            Ok(None)
+                        }
+                    })
+                    .collect::<Result<Vec<Option<(String, Vec<u8>)>>>>()?
+                    .into_par_iter()
+                    .filter_map(|f| f),
+            );
             Ok(())
         }
     }
@@ -716,7 +836,7 @@ impl ModBuilder {
                             }
                             Ok(info)
                         }
-                        Err(e) => Err(format_err!("{:?}", e)),
+                        Err(e) => Err(format_err!("Failed to parse {:?}: {:?}", f, e)),
                     }
                 })
                 .collect::<Result<Vec<Byml>>>()?;
@@ -749,14 +869,14 @@ impl ModBuilder {
             let mut writer = BufWriter::new(fs::File::create(path!(
                 &self.output / &self.content / "Actor" / "ActorInfo.product.sbyml"
             ))?);
-            writer.write_all(&Byml::Hash(actorinfo).to_compressed_binary(
+            writer.write_all(&compress(Byml::Hash(actorinfo).to_binary(
                 if self.be {
                     byml::Endian::Big
                 } else {
                     byml::Endian::Little
                 },
                 2,
-            )?)?;
+            )?)?)?;
         }
         Ok(())
     }
@@ -799,8 +919,9 @@ impl ModBuilder {
             } else {
                 let out = path!(&actor_pack_dir / [&a.name, ".sbactorpack"].join(""));
                 let mut pack: SarcWriter = if out.exists() {
-                    let data = std::fs::read(&out)?;
-                    let sarc_file = Sarc::new(&data)?;
+                    let data = unyaz_if(std::fs::read(&out)?)?;
+                    let sarc_file = Sarc::new(&data)
+                        .with_context(|| format!("Failed to read SARC {:?}", out))?;
                     let mut pack = SarcWriter::from_sarc(&sarc_file);
                     pack.files.extend(a.pack.files.into_iter());
                     pack
@@ -812,107 +933,141 @@ impl ModBuilder {
             Ok(())
         })?;
 
-        let mut title_actors: Vec<Actor> = Arc::try_unwrap(title_actors).unwrap().into_inner().unwrap();
+        let title_actors: Vec<Actor> = Arc::try_unwrap(title_actors).unwrap().into_inner().unwrap();
         if !title_actors.is_empty() {
             self.vprint(format!("Building {} TitleBG actors...", title_actors.len()));
             let title_path = path!(&self.output / &self.content / "Pack" / "TitleBG.pack");
             let mut sarc: SarcWriter = if title_path.exists() {
-                let data = std::fs::read(&title_path)?;
+                let data = unyaz_if(std::fs::read(&title_path)?)?;
                 let sarc_file = Sarc::new(&data)?;
                 SarcWriter::from_sarc(&sarc_file)
             } else {
                 SarcWriter::new(if self.be { Endian::Big } else { Endian::Little })
             };
-            sarc.files.extend(
-                title_actors
-                    .into_par_iter()
-                    .map(|a| {
-                        let name = a.name.clone();
-                        self.vprint(format!("Building actor {}", &name));
-                        let file_path = ["Actor/Pack/", a.name.as_str(), ".sbactorpack"].join("");
-                        let mut pack: SarcWriter =
-                            if let Some(entry) = sarc.files.get(file_path.as_str()) {
-                                let sarc = Sarc::new(&entry)?;
-                                let mut pack = SarcWriter::from_sarc(&sarc);
-                                pack.files.extend(a.pack.files.into_iter());
-                                pack
-                            } else {
-                                a.pack
-                            };
-                        let tmp = pack.write_to_bytes().with_context(|| {
-                            format!("Failed to create actor pack data for {}", name)
-                        })?;
-                        let actor = (file_path, compress(&tmp)?);
-                        self.vprint(format!("Built actor {}", &a.name));
-                        Ok(actor)
-                    })
-                    .collect::<Result<Vec<_>>>()?,
-            );
+            let files = title_actors
+                .into_par_iter()
+                .map(|a| {
+                    let name = a.name.clone();
+                    self.vprint(format!("Building actor {}", &name));
+                    let file_path = ["Actor/Pack/", a.name.as_str(), ".sbactorpack"].join("");
+                    let mut pack: SarcWriter =
+                        if let Some(entry) = sarc.files.get(file_path.as_str()) {
+                            let data = Yaz0Archive::new(&mut Cursor::new(entry))?.decompress()?;
+                            let sarc = Sarc::new(&data)?;
+                            let mut pack = SarcWriter::from_sarc(&sarc);
+                            pack.files.extend(a.pack.files.into_iter());
+                            pack
+                        } else {
+                            a.pack
+                        };
+                    let tmp = pack.write_to_bytes().with_context(|| {
+                        format!("Failed to create actor pack data for {}", name)
+                    })?;
+                    let actor = (file_path, compress(&tmp)?);
+                    self.vprint(format!("Built actor {}", &a.name));
+                    Ok(actor)
+                })
+                .collect::<Result<Vec<_>>>()?;
+            sarc.files.extend(files);
             fs::create_dir_all(title_path.parent().unwrap())?;
             sarc.write(&mut BufWriter::new(fs::File::create(&title_path)?))
                 .context("Failed to save TitleBG.pack")?;
             self.vprint("Finished all actors");
         }
+
+        let in_path = path!(&self.input / &self.content / "Actor");
+        self.yml_files.retain(|f| !f.starts_with(&in_path));
         Ok(())
     }
 
+    // fn build_texts(&mut self) -> Result<()> {
+
+    // }
+
     fn build_yaml(&mut self) -> Result<()> {
-        if self.yml_files.is_empty() {
-            return Ok(());
-        }
-        println!("Building misc YAML files...");
-        let actorpath = path!(&self.input / &self.content / "Actor");
+        self.yml_files.retain(|k| {
+            nest_level(k) == 0
+                && !k.to_str().unwrap().ends_with(".info.yml")
+                && k.file_stem().unwrap().to_str().unwrap() != "config"
+        });
+        let out_dir = self.output.clone();
         self.yml_files
             .par_iter()
-            .filter(|f| {
-                self.fresh_files.contains(&f)
-                    && !(f.ancestors().map(|p| p.to_owned()).any(|x| x == actorpath)
-                        || f.file_name().unwrap().to_str().unwrap() == "config.yml")
-            })
-            .try_for_each(|f| -> Result<()> {
-                self.vprint(format!("Building {}", f.to_slash_lossy()));
-                let ext = get_ext(f);
-                let out = path!(&self.output / f.strip_prefix(&self.input)?.with_extension(""));
+            .try_for_each(|file| -> Result<()> {
+                let file_with_ext = file.with_extension("");
+                let path = file_with_ext.strip_prefix(&self.input).unwrap();
+                let out = path!(out_dir / path);
                 if !out.parent().unwrap().exists() {
-                    fs::create_dir_all(out.parent().unwrap()).with_context(|| {
-                        format!(
-                            "Failed to create folder {:?}, parent of {:?}",
-                            out.parent().unwrap(),
-                            &out
-                        )
-                    })?;
+                    fs::create_dir_all(&out.parent().unwrap())?;
                 }
-                if BYML_EXTS.contains(&ext) {
-                    let byml = Byml::from_text(&fs::read_to_string(&f)?)
-                        .map_err(|e| format_err!("{:?}", e))?;
-                    let mut writer = BufWriter::new(
-                        fs::File::create(&out)
-                            .with_context(|| format!("Failed to create file {:?}", out))?,
-                    );
-                    let data = byml.to_binary(
-                        if self.be {
-                            byml::Endian::Big
-                        } else {
-                            byml::Endian::Little
-                        },
-                        2,
-                    )?;
-                    writer.write_all(&if ext.starts_with(".s") {
-                        compress(data)?
-                    } else {
-                        data
-                    })?;
-                    writer.flush()?;
-                } else if AAMP_EXTS.contains(&ext) {
-                    self.parse_pio(&f)?.write_binary(
-                        &mut fs::File::create(&out)
-                            .with_context(|| format!("Failed to create file {:?}", out))?,
-                    )?;
-                }
+                fs::write(
+                    &out,
+                    self.compiled_yml
+                        .get(&get_canon_name(path).ok_or_else(|| {
+                            format_err!("Could not get canonical path for {:?}", path)
+                        })?)
+                        .ok_or_else(|| format_err!("Could not find compiled file {:?}", path))?,
+                )?;
                 Ok(())
-            })?;
-        Ok(())
+            })
     }
+    // fn build_yaml(&mut self) -> Result<()> {
+    //     if self.yml_files.is_empty() {
+    //         return Ok(());
+    //     }
+    //     println!("Building {} unpacked YAML files...", self.yml_files.len());
+    //     let actorpath = path!(&self.input / &self.content / "Actor");
+    //     self.yml_files
+    //         .par_iter()
+    //         .filter(|f| {
+    //             self.fresh_files.contains(&f)
+    //                 && !(f.ancestors().map(|p| p.to_owned()).any(|x| x == actorpath)
+    //                     || f.file_name().unwrap().to_str().unwrap() == "config.yml")
+    //         })
+    //         .try_for_each(|f| -> Result<()> {
+    //             self.vprint(format!("Building {}", f.to_slash_lossy()));
+    //             let ext = get_ext(f);
+    //             let out = path!(&self.output / f.strip_prefix(&self.input)?.with_extension(""));
+    //             if !out.parent().unwrap().exists() {
+    //                 fs::create_dir_all(out.parent().unwrap()).with_context(|| {
+    //                     format!(
+    //                         "Failed to create folder {:?}, parent of {:?}",
+    //                         out.parent().unwrap(),
+    //                         &out
+    //                     )
+    //                 })?;
+    //             }
+    //             if BYML_EXTS.contains(&ext) {
+    //                 let byml = Byml::from_text(&fs::read_to_string(&f)?)
+    //                     .map_err(|e| format_err!("Failed to parse BYML file {:?}: {:?}", f, e))?;
+    //                 let mut writer = BufWriter::new(
+    //                     fs::File::create(&out)
+    //                         .with_context(|| format!("Failed to create file {:?}", out))?,
+    //                 );
+    //                 let data = byml.to_binary(
+    //                     if self.be {
+    //                         byml::Endian::Big
+    //                     } else {
+    //                         byml::Endian::Little
+    //                     },
+    //                     2,
+    //                 )?;
+    //                 writer.write_all(&if ext.starts_with("s") {
+    //                     compress(data)?
+    //                 } else {
+    //                     data
+    //                 })?;
+    //                 writer.flush()?;
+    //             } else if AAMP_EXTS.contains(&ext) {
+    //                 self.parse_pio(&f)?.write_binary(
+    //                     &mut fs::File::create(&out)
+    //                         .with_context(|| format!("Failed to create file {:?}", out))?,
+    //                 )?;
+    //             }
+    //             Ok(())
+    //         })?;
+    //     Ok(())
+    // }
 
     fn add_folder_to_sarc(
         &self,
@@ -925,65 +1080,71 @@ impl ModBuilder {
             .filter_map(|f| f.ok())
         {
             if item.is_file() {
+                if let Some(name) = item.file_name() {
+                    if name.to_str().unwrap() == ".align" {
+                        sarc.set_min_alignment(str::parse::<usize>(&fs::read_to_string(&item)?)?)?;
+                        continue;
+                    }
+                }
                 if !self.fresh_files.contains(&item) {
                     continue;
                 }
                 let mut store_path = item.strip_prefix(root).unwrap().to_owned();
                 let bytes = if item.extension().unwrap().to_str().unwrap() == "yml" {
                     store_path = store_path.with_extension("");
-                    let sub_ext = get_ext(&item);
-                    if AAMP_EXTS.contains(&sub_ext) {
-                        ParameterIO::from_text(&fs::read_to_string(&item).unwrap())
-                            .unwrap()
-                            .to_binary()
-                            .unwrap()
-                    } else if BYML_EXTS.contains(&sub_ext) {
-                        let data = Byml::from_text(&fs::read_to_string(&item).unwrap())
-                            .unwrap()
-                            .to_binary(
-                                if self.be {
-                                    byml::Endian::Big
-                                } else {
-                                    byml::Endian::Little
-                                },
-                                2,
-                            )?;
-                        if sub_ext.starts_with(".s") {
-                            compress(&data)?
-                        } else {
-                            data
-                        }
+                    let sub_ext = get_ext(&store_path);
+                    if AAMP_EXTS.contains(&sub_ext) || BYML_EXTS.contains(&sub_ext) {
+                        self.compiled_yml
+                            .get(
+                                &get_canon_name(
+                                    &item
+                                        .with_extension("")
+                                        .strip_prefix(&self.input)?
+                                        .to_slash_lossy(),
+                                )
+                                .unwrap(),
+                            )
+                            .ok_or_else(|| format_err!("Failed to get bytes for {:?}", &item))?
+                            .to_vec()
                     } else {
                         fs::read(&item)?
                     }
+                } else if item.extension().unwrap().to_str().unwrap() == "msyt" {
+                    let data = self
+                        .compiled_yml
+                        .get(&store_path.to_slash_lossy())
+                        .ok_or_else(|| format_err!("Failed to get bytes for {:?}", &item))?
+                        .to_vec();
+                    store_path = store_path.with_extension("msbt");
+                    data
                 } else {
                     fs::read(&item)?
                 };
                 sarc.files.insert(store_path.to_slash_lossy(), bytes);
             } else if item.is_dir() {
                 if let Some(ext) = item.extension() {
-                    if SARC_EXTS.contains(&[".", ext.to_str().unwrap()].join("").as_str()) {
+                    if SARC_EXTS.contains(&ext.to_str().unwrap()) {
                         let name: String = item.strip_prefix(root)?.to_slash_lossy();
                         let val = self.build_sarc(
                             &item,
-                            if let Some(entry) =
-                                sarc.files.par_iter().find_first(|e| e.0 == &name)
+                            if let Some(entry) = sarc.files.par_iter().find_first(|e| e.0 == &name)
                             {
-                                SarcWriter::from_sarc(&Sarc::new(entry.1).with_context(
-                                    || format!("Failed to read SARC {:?}", entry.0),
-                                )?)
-                            } else {
-                                SarcWriter::new(if self.be {
-                                    Endian::Big
+                                if &entry.1[0..4] == b"Yaz0" {
+                                    let data = Yaz0Archive::new(&mut Cursor::new(entry.1))?
+                                        .decompress()?;
+                                    SarcWriter::from_sarc(&Sarc::new(&data).with_context(|| {
+                                        format!("Failed to read SARC {:?}", entry.0)
+                                    })?)
                                 } else {
-                                    Endian::Little
-                                })
+                                    SarcWriter::from_sarc(&Sarc::new(entry.1).with_context(
+                                        || format!("Failed to read SARC {:?}", entry.0),
+                                    )?)
+                                }
+                            } else {
+                                SarcWriter::new(if self.be { Endian::Big } else { Endian::Little })
                             },
                         )?;
-                        sarc.files.insert(
-                            name,
-                            val,
-                        );
+                        sarc.files.insert(name, val);
                         continue;
                     }
                 }
@@ -999,9 +1160,16 @@ impl ModBuilder {
         if sarc.files.is_empty() {
             return Ok(vec![]);
         }
-        let mut data: Vec<u8> = sarc.write_to_bytes()?;
         let ext = f.extension().unwrap().to_str().unwrap();
-        if ext.starts_with(".s") && ext != "sarc" {
+        if [
+            "sarc", "sblarc", "blarc", "sfarc", "bgenv", "sbgenv", "genvb", "sgenvb",
+        ]
+        .contains(&ext)
+        {
+            sarc.set_legacy_mode(true);
+        }
+        let data: Vec<u8> = sarc.write_to_bytes()?;
+        if ext.starts_with("s") && ext != "sarc" {
             Ok(compress(&data)?)
         } else {
             Ok(data)
@@ -1034,7 +1202,7 @@ impl ModBuilder {
         if sarcs.is_empty() {
             return Ok(());
         }
-        println!("Building SARCs...");
+        println!("Building {} SARCs...", sarcs.len());
         sarcs.into_par_iter().try_for_each(|f| -> Result<()> {
             let out = path!(&self.output / f.strip_prefix(&self.input)?);
             let data =
@@ -1043,9 +1211,10 @@ impl ModBuilder {
                     if !out.exists() {
                         SarcWriter::new(if self.be { Endian::Big } else { Endian::Little })
                     } else {
-                        SarcWriter::from_sarc(&Sarc::new(&std::fs::read(&out)?).with_context(
-                            || format!("Failed to read SARC {}", f.to_str().unwrap()),
-                        )?)
+                        let data = std::fs::read(&out)?;
+                        SarcWriter::from_sarc(&Sarc::new(&unyaz_if(data)?).with_context(|| {
+                            format!("Failed to read SARC {}", f.to_str().unwrap())
+                        })?)
                     },
                 )?;
             if data.is_empty() {
@@ -1059,20 +1228,29 @@ impl ModBuilder {
         })?;
 
         self.other_files.retain(|f| nest_level(f) == 0);
-        self.yml_files.retain(|f| nest_level(f) == 0);
         Ok(())
     }
 
     fn build(&mut self) -> Result<()> {
+        let start: std::time::Instant = std::time::Instant::now();
         self.sort_files()?;
+        dbg!(start.elapsed());
 
+        let start: std::time::Instant = std::time::Instant::now();
         self.build_actors()?;
+        dbg!(start.elapsed());
+        let start: std::time::Instant = std::time::Instant::now();
         self.build_actorinfo()?;
+        dbg!(start.elapsed());
+        let start: std::time::Instant = std::time::Instant::now();
         self.build_sarcs()?;
+        dbg!(start.elapsed());
+        // let start: std::time::Instant = std::time::Instant::now();
         self.build_yaml()?;
+        // dbg!(start.elapsed());
 
         if !self.other_files.is_empty() {
-            println!("Copying miscellaneous files...");
+            println!("Copying {} miscellaneous files...", self.other_files.len());
             self.other_files
                 .par_iter()
                 .try_for_each(|f| -> Result<()> {
@@ -1148,9 +1326,20 @@ fn get_ext<'a>(file: &'a Path) -> &'a str {
 #[inline]
 fn compress<B: AsRef<[u8]>>(data: B) -> Result<Vec<u8>> {
     let mut bytes: Vec<u8> = vec![];
-    let ywrite = Yaz0Writer::new(&mut bytes);
+    let mut writer = BufWriter::new(&mut bytes);
+    let ywrite = Yaz0Writer::new(&mut writer);
     ywrite.compress_and_write(data.as_ref(), COMPRESS)?;
+    drop(writer);
     Ok(bytes)
+}
+
+#[inline]
+fn unyaz_if(data: Vec<u8>) -> Result<Vec<u8>> {
+    Ok(if &data[0..4] == b"Yaz0" {
+        Yaz0Archive::new(&mut Cursor::new(&data))?.decompress()?
+    } else {
+        data
+    })
 }
 
 fn write_yaz0_sarc_to_file<P: AsRef<Path>>(sarc: &mut SarcWriter, path: P) -> Result<()> {
@@ -1185,12 +1374,14 @@ mod tests {
                 );
             }
         };
+        let mut meta: HashMap<String, String> = HashMap::new();
+        meta.insert("name".to_owned(), "Second Wind".to_owned());
         ModBuilder {
             input: PathBuf::from("test/Second-Wind-WiiU"),
             output: PathBuf::from("test/Second-Wind-WiiU/build"),
             actor_dir: PathBuf::from("test/Second-Wind-WiiU/content/Actor"),
             actor_info: HashMap::new(),
-            meta: HashMap::new(),
+            meta,
             be: true,
             guess: true,
             verbose: false,
@@ -1206,8 +1397,9 @@ mod tests {
                 .collect(),
             file_times,
             fresh_files: vec![],
-            all_files: vec![],
             yml_files: vec![],
+            all_files: vec![],
+            compiled_yml: HashMap::new(),
             other_files: vec![],
         }
         .build()
