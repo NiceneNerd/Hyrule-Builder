@@ -1,11 +1,7 @@
 #![allow(clippy::unreadable_literal)]
-// #[global_allocator]
-// static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
-mod sarc_ext;
-use aamp::*;
 use anyhow::{format_err, Context, Error, Result};
 use botw_utils::extensions::*;
-use byml::Byml;
+use colored::*;
 use crc::crc32;
 use glob::glob;
 use path_macro::path;
@@ -15,20 +11,17 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3::wrap_pyfunction;
 use rayon::prelude::*;
-// use sarc::SarcEntry;
-// use sarc_ext::{SarcFile, SarcFileExt};
+use roead::{
+    aamp::*,
+    byml::Byml,
+    yaz0::{compress, decompress},
+};
 use sarc_rs::{Endian, Sarc, SarcWriter};
 use std::fs;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
-    io::Cursor,
-};
-use yaz0::{Yaz0Archive, Yaz0Writer};
-
-const COMPRESS: yaz0::CompressionLevel = yaz0::CompressionLevel::Lookahead { quality: 6 };
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 static TITLE_ACTORS: [&str; 58] = [
     "AncientArrow",
@@ -250,7 +243,7 @@ pub fn build_mod(args: BuildArgs, meta: &PyDict) -> PyResult<()> {
     match builder.build() {
         Ok(_) => Ok(()),
         Err(e) => {
-            println!("{}", e);
+            println!("{}", e.to_string().red());
             Ok(())
         }
     }
@@ -287,7 +280,7 @@ impl ModBuilder {
             Err(msg)
         } else {
             if self.warn {
-                println!("{}", msg);
+                println!("{}", msg.to_string().yellow());
             }
             Ok(())
         }
@@ -296,14 +289,15 @@ impl ModBuilder {
     #[inline]
     fn vprint<S: AsRef<str>>(&self, msg: S) {
         if self.verbose {
-            println!("{}", msg.as_ref());
+            println!("{}", msg.as_ref().blue());
         }
     }
 
     #[inline]
     fn parse_pio(&self, file: &PathBuf) -> Result<ParameterIO> {
-        Ok(ParameterIO::from_binary(&mut Cursor::new(
-            self.compiled_yml
+        Ok(ParameterIO::from_binary(
+            &self
+                .compiled_yml
                 .get(
                     &get_canon_name(
                         &file
@@ -314,7 +308,7 @@ impl ModBuilder {
                     .unwrap(),
                 )
                 .ok_or_else(|| format_err!("Failed to get bytes for {:?}", &file))?,
-        ))?)
+        )?)
     }
 
     fn parse_actor(&self, link: &PathBuf) -> Result<Option<Actor>> {
@@ -365,7 +359,7 @@ impl ModBuilder {
                             let aslist = self.parse_pio(&path!(
                                 &self.actor_dir / "ASList" / [v, ".baslist.yml"].join("")
                             ))?;
-                            for anim in aslist.list("ASDefines").unwrap().objects.values() {
+                            for anim in aslist.list("ASDefines").unwrap().objects().values() {
                                 if let Parameter::String64(filename) =
                                     anim.param("Filename").unwrap()
                                 {
@@ -385,7 +379,7 @@ impl ModBuilder {
                             let attcllist = self.parse_pio(&path!(
                                 &self.actor_dir / "AttClientList" / [v, ".batcllist.yml"].join("")
                             ))?;
-                            for atcl in attcllist.list("AttClients").unwrap().objects.values() {
+                            for atcl in attcllist.list("AttClients").unwrap().objects().values() {
                                 if let Parameter::String64(filename) =
                                     atcl.param("FileName").unwrap()
                                 {
@@ -407,7 +401,8 @@ impl ModBuilder {
                                     / "RagdollConfigList"
                                     / [v, ".brgconfiglist.yml"].join("")
                             ))?;
-                            for impulse in rglist.list("ImpulseParamList").unwrap().objects.values()
+                            for impulse in
+                                rglist.list("ImpulseParamList").unwrap().objects().values()
                             {
                                 if let Parameter::String64(filename) =
                                     impulse.param("FileName").unwrap()
@@ -433,7 +428,7 @@ impl ModBuilder {
                             let types = &physics
                                 .list("ParamSet")
                                 .ok_or_else(|| AampKeyError("ParamSet".to_owned()))?
-                                .objects
+                                .objects()
                                 .get(&1258832850u32)
                                 .ok_or_else(|| AampKeyError("1258832850".to_owned()))?;
                             if let Parameter::Bool(use_ragdoll) =
@@ -508,11 +503,11 @@ impl ModBuilder {
                                         .ok_or_else(|| AampKeyError("ParamSet".to_owned()))?
                                         .list("RigidBodySet")
                                         .ok_or_else(|| AampKeyError("RigidBodySet".to_owned()))?
-                                        .lists
+                                        .lists()
                                         .values()
                                     {
                                         if let Some(setup_path_param) = rigid
-                                            .objects
+                                            .objects()
                                             .get(&4288596824)
                                             .ok_or_else(|| AampKeyError("4288596824".to_owned()))?
                                             .param("setup_file_path")
@@ -587,20 +582,17 @@ impl ModBuilder {
                                             })?
                                             .to_binary(
                                                 if self.be {
-                                                    byml::Endian::Big
+                                                    roead::Endian::Big
                                                 } else {
-                                                    byml::Endian::Little
+                                                    roead::Endian::Little
                                                 },
-                                                2,
                                             )
-                                            .unwrap()
                                     } else if sub_ext.starts_with('b') {
                                         self.parse_pio(&v)
                                             .with_context(|| {
                                                 format!("Failed to parse AAMP file {:?}", v)
                                             })?
                                             .to_binary()
-                                            .unwrap()
                                     } else {
                                         fs::read(&v).unwrap()
                                     }
@@ -731,21 +723,19 @@ impl ModBuilder {
                                 let data = if !ext.starts_with("s") {
                                     byml.to_binary(
                                         if self.be {
-                                            byml::Endian::Big
+                                            roead::Endian::Big
                                         } else {
-                                            byml::Endian::Little
+                                            roead::Endian::Little
                                         },
-                                        2,
-                                    )?
+                                    )
                                 } else {
                                     compress(byml.to_binary(
                                         if self.be {
-                                            byml::Endian::Big
+                                            roead::Endian::Big
                                         } else {
-                                            byml::Endian::Little
+                                            roead::Endian::Little
                                         },
-                                        2,
-                                    )?)?
+                                    ))
                                 };
                                 Ok(Some((
                                     get_canon_name(
@@ -755,19 +745,19 @@ impl ModBuilder {
                                     data,
                                 )))
                             } else if AAMP_EXTS.contains(&ext) {
-                                let pio = ParameterIO::from_text(&fs::read_to_string(&f)?)
-                                    .with_context(|| {
-                                        format!("Failed to parse AAMP file {:?}", &f)
-                                    })?;
+                                let text = fs::read_to_string(&f)?;
+                                let pio = ParameterIO::from_text(&text).with_context(|| {
+                                    format!("Failed to parse AAMP file {:?}", &f)
+                                })?;
                                 Ok(Some((
                                     get_canon_name(
                                         f.with_extension("").strip_prefix(&input)?.to_slash_lossy(),
                                     )
                                     .unwrap(),
                                     if ext.starts_with("s") {
-                                        compress(pio.to_binary()?)?
+                                        compress(pio.to_binary())
                                     } else {
-                                        pio.to_binary()?
+                                        pio.to_binary()
                                     },
                                 )))
                             } else {
@@ -824,7 +814,7 @@ impl ModBuilder {
                             if let Some(gen_info) = gen_infos
                                 .lock()
                                 .unwrap()
-                                .get_mut(info["name"].as_string().unwrap().as_str())
+                                .get_mut(info["name"].as_string().unwrap())
                             {
                                 info.as_mut_hash().unwrap().extend(
                                     gen_info
@@ -871,12 +861,11 @@ impl ModBuilder {
             ))?);
             writer.write_all(&compress(Byml::Hash(actorinfo).to_binary(
                 if self.be {
-                    byml::Endian::Big
+                    roead::Endian::Big
                 } else {
-                    byml::Endian::Little
+                    roead::Endian::Little
                 },
-                2,
-            )?)?)?;
+            )))?;
         }
         Ok(())
     }
@@ -952,7 +941,7 @@ impl ModBuilder {
                     let file_path = ["Actor/Pack/", a.name.as_str(), ".sbactorpack"].join("");
                     let mut pack: SarcWriter =
                         if let Some(entry) = sarc.files.get(file_path.as_str()) {
-                            let data = Yaz0Archive::new(&mut Cursor::new(entry))?.decompress()?;
+                            let data = decompress(&entry)?;
                             let sarc = Sarc::new(&data)?;
                             let mut pack = SarcWriter::from_sarc(&sarc);
                             pack.files.extend(a.pack.files.into_iter());
@@ -963,7 +952,7 @@ impl ModBuilder {
                     let tmp = pack.write_to_bytes().with_context(|| {
                         format!("Failed to create actor pack data for {}", name)
                     })?;
-                    let actor = (file_path, compress(&tmp)?);
+                    let actor = (file_path, compress(&tmp));
                     self.vprint(format!("Built actor {}", &a.name));
                     Ok(actor)
                 })
@@ -1130,8 +1119,7 @@ impl ModBuilder {
                             if let Some(entry) = sarc.files.par_iter().find_first(|e| e.0 == &name)
                             {
                                 if &entry.1[0..4] == b"Yaz0" {
-                                    let data = Yaz0Archive::new(&mut Cursor::new(entry.1))?
-                                        .decompress()?;
+                                    let data = decompress(&entry.1)?;
                                     SarcWriter::from_sarc(&Sarc::new(&data).with_context(|| {
                                         format!("Failed to read SARC {:?}", entry.0)
                                     })?)
@@ -1170,7 +1158,7 @@ impl ModBuilder {
         }
         let data: Vec<u8> = sarc.write_to_bytes()?;
         if ext.starts_with("s") && ext != "sarc" {
-            Ok(compress(&data)?)
+            Ok(compress(&data))
         } else {
             Ok(data)
         }
@@ -1323,20 +1311,20 @@ fn get_ext<'a>(file: &'a Path) -> &'a str {
     file.extension().unwrap().to_str().unwrap()
 }
 
-#[inline]
-fn compress<B: AsRef<[u8]>>(data: B) -> Result<Vec<u8>> {
-    let mut bytes: Vec<u8> = vec![];
-    let mut writer = BufWriter::new(&mut bytes);
-    let ywrite = Yaz0Writer::new(&mut writer);
-    ywrite.compress_and_write(data.as_ref(), COMPRESS)?;
-    drop(writer);
-    Ok(bytes)
-}
+// #[inline]
+// fn compress<B: AsRef<[u8]>>(data: B) -> Result<Vec<u8>> {
+//     let mut bytes: Vec<u8> = vec![];
+//     let mut writer = BufWriter::new(&mut bytes);
+//     let ywrite = Yaz0Writer::new(&mut writer);
+//     ywrite.compress_and_write(data.as_ref(), COMPRESS)?;
+//     drop(writer);
+//     Ok(bytes)
+// }
 
 #[inline]
 fn unyaz_if(data: Vec<u8>) -> Result<Vec<u8>> {
     Ok(if &data[0..4] == b"Yaz0" {
-        Yaz0Archive::new(&mut Cursor::new(&data))?.decompress()?
+        decompress(&data)?
     } else {
         data
     })
@@ -1344,9 +1332,7 @@ fn unyaz_if(data: Vec<u8>) -> Result<Vec<u8>> {
 
 fn write_yaz0_sarc_to_file<P: AsRef<Path>>(sarc: &mut SarcWriter, path: P) -> Result<()> {
     let mut bwriter = BufWriter::new(fs::File::create(path.as_ref())?);
-    let writer = Yaz0Writer::new(&mut bwriter);
-    let tmp = sarc.write_to_bytes()?;
-    writer.compress_and_write(&tmp, COMPRESS)?;
+    bwriter.write(&compress(sarc.write_to_bytes()?))?;
     bwriter.flush()?;
     Ok(())
 }
@@ -1357,6 +1343,7 @@ mod tests {
     use std::collections::HashMap;
     use std::fs;
     use std::path::PathBuf;
+
     #[test]
     fn build_sw() {
         let mut file_times: HashMap<PathBuf, u64> = HashMap::new();
@@ -1394,6 +1381,54 @@ mod tests {
                 .iter()
                 .map(|x| x.to_string())
                 .chain(vec!["BluntArrow".to_owned()].into_iter())
+                .collect(),
+            file_times,
+            fresh_files: vec![],
+            yml_files: vec![],
+            all_files: vec![],
+            compiled_yml: HashMap::new(),
+            other_files: vec![],
+        }
+        .build()
+        .unwrap()
+    }
+    
+    #[test]
+    fn build_gs() {
+        let mut file_times: HashMap<PathBuf, u64> = HashMap::new();
+        let done_path = PathBuf::from("test/Gossip-Stones/.done");
+        if done_path.exists() {
+            for line in fs::read_to_string(done_path)
+                .unwrap()
+                .split('\n')
+                .filter(|x| x != &"")
+            {
+                let data: Vec<&str> = line.split(',').collect();
+                file_times.insert(
+                    PathBuf::from(["test/Gossip-Stones/", data[0]].join("")),
+                    str::parse::<u64>(data[1]).unwrap(),
+                );
+            }
+        };
+        let mut meta: HashMap<String, String> = HashMap::new();
+        meta.insert("name".to_owned(), "Second Wind".to_owned());
+        ModBuilder {
+            input: PathBuf::from("test/Gossip-Stones"),
+            output: PathBuf::from("test/Gossip-Stones/build"),
+            actor_dir: PathBuf::from("test/Gossip-Stones/content/Actor"),
+            actor_info: HashMap::new(),
+            meta,
+            be: true,
+            guess: true,
+            verbose: false,
+            warn: true,
+            strict: false,
+            no_rstb: false,
+            content: "content".to_owned(),
+            aoc: "aoc".to_owned(),
+            titles: crate::TITLE_ACTORS
+                .iter()
+                .map(|x| x.to_string())
                 .collect(),
             file_times,
             fresh_files: vec![],
