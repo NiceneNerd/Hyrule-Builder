@@ -1,17 +1,14 @@
-mod actor;
+pub(crate) mod actor;
+pub mod config;
 mod event;
 
+use super::util::*;
 use crate::{
     builder::{actor::Actor, event::Event},
     unzip_some::unzip_some,
 };
-
-use super::util::*;
 use anyhow::{anyhow, format_err, Context, Result};
-use botw_utils::{
-    get_canon_name, get_canon_name_without_root,
-    hashes::{Platform, StockHashTable},
-};
+use botw_utils::{get_canon_name, get_canon_name_without_root, hashes::StockHashTable};
 use colored::*;
 use jstr::jstr;
 use path_slash::{PathBufExt, PathExt};
@@ -20,10 +17,11 @@ use roead::{
     aamp::ParameterIO,
     byml::Byml,
     sarc::{Sarc, SarcWriter},
-    yaz0::{compress, decompress},
+    yaz0::compress,
     Endian,
 };
 use rstb::ResourceSizeTable;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     ffi::OsStr,
@@ -35,6 +33,14 @@ use std::{
 
 pub(crate) type Hash = BTreeMap<String, Byml>;
 
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct BuildConfig {
+    pub meta: HashMap<String, String>,
+    pub flags: Vec<String>,
+    pub options: HashMap<String, String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum WarnLevel {
@@ -45,21 +51,21 @@ pub enum WarnLevel {
 
 #[derive(Debug)]
 pub(crate) struct Builder {
-    be: bool,
-    source: PathBuf,
-    output: PathBuf,
-    content: PathBuf,
-    aoc: PathBuf,
-    file_times: HashMap<PathBuf, u64>,
-    modified_files: HashSet<PathBuf>,
-    hash_table: StockHashTable,
-    compiled: Arc<Mutex<HashMap<PathBuf, Vec<u8>>>>,
-    size_table: Arc<Mutex<ResourceSizeTable>>,
-    title_actors: Vec<String>,
-    actorinfo: Option<Hash>,
-    meta: HashMap<String, String>,
-    warn: WarnLevel,
-    verbose: bool,
+    pub be: bool,
+    pub source: PathBuf,
+    pub output: PathBuf,
+    pub content: PathBuf,
+    pub aoc: PathBuf,
+    pub file_times: HashMap<PathBuf, u64>,
+    pub modified_files: HashSet<PathBuf>,
+    pub hash_table: StockHashTable,
+    pub compiled: Arc<Mutex<HashMap<PathBuf, Vec<u8>>>>,
+    pub size_table: Arc<Mutex<ResourceSizeTable>>,
+    pub title_actors: Vec<String>,
+    pub actorinfo: Option<Hash>,
+    pub meta: HashMap<String, String>,
+    pub warn: WarnLevel,
+    pub verbose: bool,
 }
 
 impl Builder {
@@ -189,11 +195,6 @@ impl Builder {
     }
 
     fn set_resource_size(&self, entry: &str, data: &[u8]) {
-        if entry.contains("Magnetglove.bac") {
-            dbg!(entry);
-            dbg!(data.len());
-            dbg!(self.size_table.lock().unwrap().get(entry));
-        }
         if !self.hash_table.is_file_modded(entry, data, true) {
             return;
         }
@@ -706,15 +707,10 @@ impl Builder {
         Ok(())
     }
 
-    fn build(&mut self) -> Result<()> {
+    pub(crate) fn build(&mut self) -> Result<()> {
         if !validate_source(&self.source) {
             return Err(anyhow!("Source folder is not in a supported mod format"));
         }
-        dbg!(self
-            .size_table
-            .lock()
-            .unwrap()
-            .get("Actor/Pack/Item_Magnetglove.bactorpack"));
         self.load_modified_files()?;
         self.build_actors()?;
         self.build_events()?;
@@ -729,98 +725,44 @@ impl Builder {
     }
 }
 
-pub fn build(
-    source: PathBuf,
-    be: bool,
-    hard_warnings: bool,
-    ignore_warnings: bool,
-    verbose: bool,
-    output: Option<PathBuf>,
-    title_actors: Vec<String>,
-) -> Result<()> {
-    let output = output.unwrap_or_else(|| source.join("build"));
-    let content = PathBuf::from(if be {
-        "content"
-    } else {
-        "01007EF00011E000/romfs"
-    });
-    Builder {
-        be,
-        file_times: HashMap::new(),
-        meta: HashMap::new(),
-        modified_files: HashSet::new(),
-        actorinfo: None,
-        hash_table: StockHashTable::new(&if be { Platform::WiiU } else { Platform::Switch }),
-        size_table: Arc::new(Mutex::new({
-            let try_table = output
-                .join(&content)
-                .join("System/Resource/ResourceSizeTable.product.srsizetable");
-            if try_table.exists() {
-                if verbose {
-                    println!("{}", "Loading last built RSTB".bright_black());
-                }
-                ResourceSizeTable::from_binary(decompress(fs::read(try_table)?)?)?
-            } else {
-                let try_table = source
-                    .join(&content)
-                    .join("System/Resource/ResourceSizeTable.product.json");
-                if try_table.exists() {
-                    if verbose {
-                        println!("{}", "Loading JSON RSTB".bright_black());
-                    }
-                    ResourceSizeTable::from_text(fs::read_to_string(try_table)?)?
-                } else {
-                    if verbose {
-                        println!("{}", "Loading fresh RSTB".bright_black());
-                    }
-                    ResourceSizeTable::new_from_stock(if be {
-                        rstb::Endian::Big
-                    } else {
-                        rstb::Endian::Little
-                    })
-                }
-            }
-        })),
-        content,
-        aoc: PathBuf::from(if be {
-            "aoc/0010"
-        } else {
-            "01007EF00011F001/romfs"
-        }),
-        output,
-        source,
-        title_actors: title_actors
-            .into_iter()
-            .chain(actor::TITLE_ACTORS.iter().map(|t| t.to_string()))
-            .collect(),
-        compiled: Arc::new(Mutex::new(HashMap::new())),
-        verbose,
-        warn: if hard_warnings {
-            WarnLevel::Error
-        } else if ignore_warnings {
-            WarnLevel::None
-        } else {
-            WarnLevel::Warn
-        },
-    }
-    .build()
-}
-
 #[cfg(test)]
 mod tests {
+    use super::{Builder, WarnLevel};
+    use botw_utils::hashes::{Platform, StockHashTable};
+    use rstb::ResourceSizeTable;
+    use std::{
+        collections::{HashMap, HashSet},
+        path::PathBuf,
+        sync::{Arc, Mutex},
+    };
+
     #[test]
     fn build_u() {
         std::fs::remove_dir_all("test/project/build").unwrap();
         std::fs::remove_file("test/project/.db").unwrap_or(());
-        super::build(
-            std::path::PathBuf::from("test/project"),
-            true,
-            false,
-            false,
-            true,
-            None,
-            vec![],
-        )
+        Builder {
+            be: true,
+            file_times: HashMap::new(),
+            meta: HashMap::new(),
+            modified_files: HashSet::new(),
+            actorinfo: None,
+            hash_table: StockHashTable::new(&Platform::WiiU),
+            size_table: Arc::new(Mutex::new(ResourceSizeTable::new_from_stock(
+                rstb::Endian::Big,
+            ))),
+            content: PathBuf::from("content"),
+            aoc: PathBuf::from("aoc/0010"),
+            output: "test/project/build".into(),
+            source: "test/project".into(),
+            title_actors: super::actor::TITLE_ACTORS
+                .iter()
+                .map(|t| t.to_string())
+                .collect(),
+            compiled: Arc::new(Mutex::new(HashMap::new())),
+            verbose: false,
+            warn: WarnLevel::Warn,
+        }
+        .build()
         .unwrap()
     }
 

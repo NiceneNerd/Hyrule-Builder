@@ -585,6 +585,7 @@ dependencies = [
  "rayon",
  "roead",
  "rstb",
+ "serde",
  "serde_yaml",
  "structopt",
 ]
