@@ -256,32 +256,33 @@ impl Builder {
         Ok(())
     }
 
-    // TODO: Make use of these
-    // fn load_actorinfo(&mut self) -> Result<()> {
-    //     println!("Loading actor info");
-    //     self.actorinfo = Some(
-    //         glob::glob(
-    //             self.source_content()
-    //                 .join("Actor/ActorInfo/**/*.info.yml")
-    //                 .as_os_str()
-    //                 .to_str()
-    //                 .unwrap(),
-    //         )?
-    //         .filter_map(Result::ok)
-    //         .try_fold(BTreeMap::new(), |mut actorinfo, file| -> Result<Hash> {
-    //             actorinfo.insert(
-    //                 file.file_stem()
-    //                     .context("Whoa, no filename")?
-    //                     .to_string_lossy()
-    //                     .into(),
-    //                 Byml::from_text(fs::read_to_string(&file)?)?,
-    //             );
-    //             Ok(actorinfo)
-    //         })?,
-    //     );
-    //     Ok(())
-    // }
+    fn load_actorinfo(&mut self) -> Result<()> {
+        println!("Loading actor info");
+        self.actorinfo = Some(
+            glob::glob(
+                self.source_content()
+                    .join("Actor/ActorInfo/**/*.info.yml")
+                    .as_os_str()
+                    .to_str()
+                    .unwrap(),
+            )?
+            .filter_map(Result::ok)
+            .try_fold(BTreeMap::new(), |mut actorinfo, file| -> Result<Hash> {
+                actorinfo.insert(
+                    file.file_stem()
+                        .context("Whoa, no filename")?
+                        .to_string_lossy()
+                        .trim_end_matches(".info")
+                        .into(),
+                    Byml::from_text(fs::read_to_string(&file)?)?,
+                );
+                Ok(actorinfo)
+            })?,
+        );
+        Ok(())
+    }
 
+    // TODO: Make use of these
     // fn update_actorinfo(&mut self, info: Hash) -> Result<()> {
     //     if let Some(actorinfo) = self.actorinfo.as_mut() {
     //         actorinfo.extend(info);
@@ -345,11 +346,43 @@ impl Builder {
                 self.compiled.lock().unwrap().par_extend(built_title_actors);
             }
         }
+        Ok(())
+    }
+
+    fn build_actorinfo(&mut self) -> Result<()> {
         if let Some(actorinfo) = self.actorinfo.take() {
-            println!("Creating actor info");
+            println!("Building actor info");
+            let mut info = Hash::new();
+            info.insert(
+                "Hashes".to_owned(),
+                Byml::Array({
+                    let mut hashes: Vec<_> = actorinfo.keys().map(|n| hash_name(n)).collect();
+                    hashes.sort_unstable();
+                    hashes
+                        .into_par_iter()
+                        .map(|hash| {
+                            if hash < 2147483648 {
+                                Byml::Int(hash as i32)
+                            } else {
+                                Byml::UInt(hash)
+                            }
+                        })
+                        .collect()
+                }),
+            );
+            info.insert(
+                "Actors".to_owned(),
+                Byml::Array({
+                    let mut actors: Vec<_> = actorinfo.into_par_iter().map(|(_, a)| a).collect();
+                    actors.sort_unstable_by_key(|a| {
+                        hash_name(a.as_hash().unwrap()["name"].as_string().unwrap())
+                    });
+                    actors
+                }),
+            );
             fs::write(
                 self.out_content().join("Actor/ActorInfo.product.sbyml"),
-                Byml::Hash(actorinfo).to_binary(self.endian()),
+                compress(Byml::Hash(info).to_binary(self.endian())),
             )?;
         }
         Ok(())
@@ -712,7 +745,11 @@ impl Builder {
             return Err(anyhow!("Source folder is not in a supported mod format"));
         }
         self.load_modified_files()?;
+        if self.source_content().join("Actor/ActorInfo").exists() {
+            self.load_actorinfo()?;
+        }
         self.build_actors()?;
+        self.build_actorinfo()?;
         self.build_events()?;
         self.build_texts()?;
         self.build_packs()?;
@@ -725,6 +762,12 @@ impl Builder {
     }
 }
 
+const CRC32: crc::Crc<u32> = crc::Crc::<u32>::new(&crc::CRC_32_ISO_HDLC);
+
+fn hash_name(name: &str) -> u32 {
+    CRC32.checksum(name.as_bytes())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Builder, WarnLevel};
@@ -735,6 +778,34 @@ mod tests {
         path::PathBuf,
         sync::{Arc, Mutex},
     };
+
+    #[test]
+    fn test_hash() {
+        assert_eq!(super::hash_name("EnemyFortressMgrTag"), 31119);
+        // for (i, alg) in [
+        //     crc::CRC_32_AIXM,
+        //     crc::CRC_32_AUTOSAR,
+        //     crc::CRC_32_BASE91_D,
+        //     crc::CRC_32_BZIP2,
+        //     crc::CRC_32_CD_ROM_EDC,
+        //     crc::CRC_32_CKSUM,
+        //     crc::CRC_32_ISCSI,
+        //     crc::CRC_32_ISO_HDLC,
+        //     crc::CRC_32_JAMCRC,
+        //     crc::CRC_32_MPEG_2,
+        //     crc::CRC_32_XFER,
+        // ]
+        // .iter()
+        // .enumerate()
+        // {
+        //     let crc: crc::Crc<u32> = crc::Crc::<u32>::new(alg);
+        //     if crc.checksum(b"EnemyFortressMgrTag") == 31119 {
+        //         println!("{}", i);
+        //         return;
+        //     }
+        // }
+        // panic!("None worked!!!");
+    }
 
     #[test]
     fn build_u() {

@@ -1,3 +1,4 @@
+use crate::util::get_ext;
 use super::{Builder, Result};
 use anyhow::Context;
 use jstr::jstr;
@@ -128,17 +129,17 @@ impl<'a> Event<'a> {
         let mut pack = SarcWriter::new(self.builder.endian());
         let root = self.builder.source.join(&self.builder.content);
         self.files.into_iter().try_for_each(|f| -> Result<()> {
+            if !f.exists() {
+                self.builder.warn(&jstr!(
+                    "Event {&self.name} missing file {&f.to_slash_lossy()}"
+                ))?;
+                return Ok(());
+            };
             let mut filename = f
                 .strip_prefix(&root)
                 .with_context(|| f.to_slash_lossy())?
                 .to_owned();
-            if filename
-                .extension()
-                .context("No extension")?
-                .to_str()
-                .unwrap()
-                == "yml"
-            {
+            if get_ext(&filename)? == "yml" {
                 filename = filename.with_extension("");
             }
             let data = self.builder.get_resource_data(&f)?;

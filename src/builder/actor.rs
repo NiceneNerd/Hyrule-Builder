@@ -1,9 +1,3 @@
-use std::{
-    fmt::Debug,
-    fs,
-    path::{Path, PathBuf},
-};
-
 use crate::util::*;
 use anyhow::{Context, Result};
 use jstr::jstr;
@@ -13,6 +7,11 @@ use roead::{
     aamp::{hash_name, ParamList, ParameterIO},
     sarc::SarcWriter,
     yaz0::compress,
+};
+use std::{
+    fmt::Debug,
+    fs,
+    path::{Path, PathBuf},
 };
 
 pub(crate) static TITLE_ACTORS: &[&str] = &[
@@ -261,13 +260,7 @@ impl<'a> Actor<'a> {
         let root = self.builder.source.join(&self.builder.content);
         self.files.into_iter().try_for_each(|f| -> Result<()> {
             let mut filename = f.strip_prefix(&root)?.to_owned();
-            if filename
-                .extension()
-                .context("No extension")?
-                .to_str()
-                .unwrap()
-                == "yml"
-            {
+            if get_ext(&filename)? == "yml" {
                 filename = filename.with_extension("");
             }
             match self.builder.get_resource_data(&f) {
@@ -279,7 +272,9 @@ impl<'a> Actor<'a> {
                     if let Some(err) = e.downcast_ref::<std::io::Error>() {
                         if let std::io::ErrorKind::NotFound = err.kind() {
                             if filename.starts_with("Physics") {
-                                self.builder.warn(&jstr!("Havok file {&f.to_slash_lossy()} not found for actor {&self.name}.\nIgnore if intentionally using a file not in the actor pack."))?;
+                                self.builder.warn(&(
+                                    jstr!("Havok file {&f.to_slash_lossy()} not found for actor {&self.name}.\n")
+                                    + "Ignore if intentionally using a file not in the actor pack."))?;
                                 return Ok(())
                             }
                         }

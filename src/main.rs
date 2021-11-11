@@ -1,5 +1,6 @@
 #![feature(option_result_contains)]
 use crate::builder::BuildConfig;
+use anyhow::Result;
 use botw_utils::hashes::{Platform, StockHashTable};
 use builder::WarnLevel;
 use colored::*;
@@ -11,9 +12,10 @@ use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
 };
-use structopt::StructOpt;
+use structopt::{clap::AppSettings::ColoredHelp, StructOpt};
 
 mod builder;
+mod settings;
 mod unbuilder;
 mod unzip_some;
 mod util;
@@ -24,7 +26,7 @@ mod util;
     about = "Mod building tool for The Legend of Zelda: Breath of the Wild",
     version = env!("CARGO_PKG_VERSION"),
     rename_all = "kebab-case",
-    setting = structopt::clap::AppSettings::ColoredHelp
+    setting = ColoredHelp
 )]
 struct Opt {
     #[structopt(long, short, help = "Show detailed output")]
@@ -38,7 +40,7 @@ struct Opt {
 pub(crate) enum Command {
     /// Builds a mod from a source-like structure into binary game files
     /// {n}Note: Flags can be set using a config.yml file. See readme for details.
-    #[structopt(setting = structopt::clap::AppSettings::ColoredHelp)]
+    #[structopt(setting = ColoredHelp)]
     Build {
         #[structopt(long, short, help = "Use big endian/Wii U mode")]
         be: bool,
@@ -59,10 +61,7 @@ pub(crate) enum Command {
         source: Option<PathBuf>,
     },
     /// Creates a new source-like mod project
-    #[structopt(
-        setting = structopt::clap::AppSettings::ColoredHelp,
-        alias = "unbuild"
-    )]
+    #[structopt(setting = ColoredHelp, alias = "unbuild")]
     Init {
         #[structopt(long, short, help = "Use big endian/Wii U mode")]
         be: bool,
@@ -75,7 +74,7 @@ pub(crate) enum Command {
     },
 }
 
-fn main() -> Result<(), anyhow::Error> {
+fn main() -> Result<()> {
     let opt = Opt::from_args();
     match opt.command {
         Command::Init {
@@ -83,7 +82,7 @@ fn main() -> Result<(), anyhow::Error> {
             directory,
             source,
             config,
-        } => unbuilder::unbuild(be, directory, source, config),
+        } => unbuilder::unbuild(be, source, directory, config),
         Command::Build {
             be,
             hard_warnings,
