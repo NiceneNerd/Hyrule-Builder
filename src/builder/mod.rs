@@ -1,6 +1,6 @@
 pub(crate) mod actor;
 pub mod config;
-mod event;
+pub(crate) mod event;
 
 use super::util::*;
 use crate::{
@@ -61,7 +61,8 @@ pub(crate) struct Builder {
     pub hash_table: StockHashTable,
     pub compiled: Arc<Mutex<HashMap<PathBuf, Vec<u8>>>>,
     pub size_table: Arc<Mutex<ResourceSizeTable>>,
-    pub title_actors: Vec<String>,
+    pub title_actors: HashSet<String>,
+    pub title_events: HashSet<String>,
     pub actorinfo: Option<Hash>,
     pub meta: HashMap<String, String>,
     pub warn: WarnLevel,
@@ -235,7 +236,7 @@ impl Builder {
         }
         self.modified_files = glob::glob(self.source.join("**/*").to_str().context("Bad glob")?)?
             .filter_map(Result::ok)
-            .filter(|f| f.is_file())
+            .filter(|f| f.is_file() && f.file_name() != Some(OsStr::new(".db")))
             .filter(|file| {
                 !self.file_times.contains_key(file) || {
                     fs::metadata(file)
@@ -393,6 +394,14 @@ impl Builder {
         let event_info_root = event_root.join("EventInfo");
         if event_root.exists() {
             println!("Checking events");
+            let title_event_path = self.source_content().join("Pack/TitleBG.pack/EventFlow");
+            if title_event_path.exists() {
+                self.title_events.extend(
+                    glob::glob(title_event_path.join("*.bfevfl").to_str().unwrap())?
+                        .flat_map(Result::ok)
+                        .map(|f| f.file_stem().unwrap().to_string_lossy().into()),
+                )
+            };
             let (event_info, event_packs): (Hash, Vec<Event>) = unzip_some(
                 glob::glob(event_info_root.join("*.info.yml").to_str().unwrap())?
                     .filter_map(Result::ok)
@@ -584,34 +593,34 @@ impl Builder {
     fn build_packs(&self) -> Result<()> {
         for root in [&self.aoc, &self.content] {
             let source_root = self.source.join(root);
-            glob::glob(&source_root.join("Pack/*.pack").to_string_lossy())?
+            let packs = glob::glob(&source_root.join("Pack/*.pack").to_string_lossy())?
                 .filter_map(Result::ok)
                 .filter(|f| {
                     SARC_EXTS.contains(&f.extension())
                         && self.modified_files.par_iter().any(|mf| mf.starts_with(f))
                 })
-                .collect::<Vec<_>>()
-                .into_par_iter()
-                .try_for_each(|pack| -> Result<()> {
-                    println!(
-                        "Building {}",
-                        pack.file_name()
-                            .and_then(|n| n.to_str())
-                            .context("No pack name")?
-                    );
-                    let out = self
-                        .output
-                        .join(&root)
-                        .join(pack.strip_prefix(&source_root)?);
-                    let mut sarc = if out.exists() {
-                        SarcWriter::from(Sarc::read(fs::read(&out)?)?)
-                    } else {
-                        SarcWriter::new(self.endian())
-                    };
-                    fs::create_dir_all(out.parent().context("No parent???")?)?;
-                    fs::write(out, self.build_sarc(&pack, &mut sarc)?)?;
-                    Ok(())
-                })?;
+                .collect::<Vec<_>>();
+            println!("Building {} packs", packs.len());
+            packs.into_par_iter().try_for_each(|pack| -> Result<()> {
+                self.vprint(&format!(
+                    "Building {}",
+                    pack.file_name()
+                        .and_then(|n| n.to_str())
+                        .context("No pack name")?
+                ));
+                let out = self
+                    .output
+                    .join(&root)
+                    .join(pack.strip_prefix(&source_root)?);
+                let mut sarc = if out.exists() {
+                    SarcWriter::from(Sarc::read(fs::read(&out)?)?)
+                } else {
+                    SarcWriter::new(self.endian())
+                };
+                fs::create_dir_all(out.parent().context("No parent???")?)?;
+                fs::write(out, self.build_sarc(&pack, &mut sarc)?)?;
+                Ok(())
+            })?;
         }
         Ok(())
     }
@@ -745,6 +754,10 @@ impl Builder {
             return Err(anyhow!("Source folder is not in a supported mod format"));
         }
         self.load_modified_files()?;
+        if self.modified_files.is_empty() {
+            println!("Nope, nothing to do");
+            return Ok(());
+        }
         if self.source_content().join("Actor/ActorInfo").exists() {
             self.load_actorinfo()?;
         }
@@ -827,6 +840,11 @@ mod tests {
             source: "test/project".into(),
             title_actors: super::actor::TITLE_ACTORS
                 .iter()
+                .map(|t| t.to_string())
+                .collect(),
+            title_events: super::event::TITLE_EVENTS
+                .iter()
+                .chain(super::event::NESTED_EVENTS.iter())
                 .map(|t| t.to_string())
                 .collect(),
             compiled: Arc::new(Mutex::new(HashMap::new())),

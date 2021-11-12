@@ -188,6 +188,11 @@ fn main() -> Result<()> {
                     .into_iter()
                     .chain(builder::actor::TITLE_ACTORS.iter().map(|t| t.to_string()))
                     .collect(),
+                title_events: builder::event::TITLE_EVENTS
+                    .iter()
+                    .chain(builder::event::NESTED_EVENTS.iter())
+                    .map(|t| t.to_string())
+                    .collect(),
                 compiled: Arc::new(Mutex::new(HashMap::new())),
                 verbose,
                 warn: if hard_warnings {

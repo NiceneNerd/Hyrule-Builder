@@ -16,8 +16,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-static NESTED_EVENTS: &[&str] = &["SignalFlowchart"];
-static TITLE_EVENTS: &[&str] = &[
+pub static NESTED_EVENTS: &[&str] = &["SignalFlowchart"];
+pub static TITLE_EVENTS: &[&str] = &[
+    "AocResident",
+    "Aoc2Resident",
     "Demo000_0",
     "Demo000_2",
     "Demo001_0",
@@ -36,6 +38,7 @@ static TITLE_EVENTS: &[&str] = &[
     "Demo042_1",
     "Demo048_0",
     "Demo048_1",
+    "Demo103_0",
     "GetDemo",
     "OperationGuide",
     "SDemo_D-6",
@@ -44,7 +47,7 @@ static TITLE_EVENTS: &[&str] = &[
 pub(crate) struct Event<'a> {
     builder: &'a Builder,
     pub name: String,
-    files: Vec<PathBuf>,
+    files: HashSet<PathBuf>,
 }
 
 impl<'a> Debug for Event<'a> {
@@ -80,7 +83,7 @@ impl<'a> Event<'a> {
                 Err(BymlError::TypeError)
             }
         }?;
-        if NESTED_EVENTS.contains(&name) {
+        if builder.title_events.contains(name) {
             return Ok((event_info.into_iter(), None));
         }
         let root = builder.source_content();
@@ -88,7 +91,7 @@ impl<'a> Event<'a> {
         let as_root = root.join("Actor/AS").join(name);
         let camera_root = root.join("Camera").join(name);
         let main_exts = [Some(OsStr::new("bfevfl")), Some(OsStr::new("bfevtm"))];
-        let files: Vec<PathBuf> = find_subfiles(&event_info)?
+        let files: HashSet<PathBuf> = find_subfiles(&event_info)?
             .map(|file| event_flow_root.join(file))
             .chain(
                 find_as_files(&event_info)?
@@ -96,23 +99,25 @@ impl<'a> Event<'a> {
             )
             .chain(find_camera_files(&event_info)?.map(|file| camera_root.join(file)))
             .chain(find_single_files(&event_info, name)?.map(|file| root.join(file)))
-            .filter(|f| {
-                let name = f.file_name().unwrap().to_str().unwrap();
-                !TITLE_EVENTS.iter().any(|e| name.contains(e)) || main_exts.contains(&f.extension())
-            })
             .collect();
         if !files.is_empty()
             && files
                 .iter()
                 .chain(&[file.to_owned()])
                 .any(|f| builder.modified_files.contains(f))
-            && files
+            && !files
                 .iter()
                 .filter(|f| {
                     main_exts.contains(&f.extension())
                         || f.file_stem().unwrap().to_str().unwrap().ends_with(".bdemo")
                 })
-                .all(|f| f.exists())
+                .filter(|f| {
+                    !builder
+                        .title_events
+                        .iter()
+                        .any(|e| f.file_name().unwrap().to_str().unwrap().contains(e))
+                })
+                .any(|f| !f.exists())
         {
             builder.vprint(&jstr!("Event {&name} modified"));
             Ok((
@@ -134,16 +139,24 @@ impl<'a> Event<'a> {
         let mut pack = SarcWriter::new(self.builder.endian());
         let root = self.builder.source.join(&self.builder.content);
         self.files.into_iter().try_for_each(|f| -> Result<()> {
-            if !f.exists() {
-                self.builder.warn(&jstr!(
-                    "Event {&self.name} missing file {&f.to_slash_lossy()}"
-                ))?;
-                return Ok(());
-            };
             let mut filename = f
                 .strip_prefix(&root)
                 .with_context(|| f.to_slash_lossy())?
                 .to_owned();
+            if !f.exists() {
+                if !self
+                    .builder
+                    .title_events
+                    .iter()
+                    .any(|e| f.file_name().unwrap().to_str().unwrap().contains(e))
+                    && !root.join("Pack/TitleBG.pack").join(&filename).exists()
+                {
+                    self.builder.warn(&jstr!(
+                        "Event {&self.name} missing file {&f.to_slash_lossy()}"
+                    ))?;
+                }
+                return Ok(());
+            };
             if get_ext(&filename)? == "yml" {
                 filename = filename.with_extension("");
             }
