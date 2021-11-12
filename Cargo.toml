@@ -1,6 +1,6 @@
 [package]
 name = "hyrule-builder"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 
 [dependencies]
@@ -24,5 +24,5 @@ structopt = "0.3.23"
 
 [profile.release]
 lto = "fat"
-# codegen-units = 1
+codegen-units = 1
 panic = "abort"
