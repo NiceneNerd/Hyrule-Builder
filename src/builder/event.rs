@@ -1,5 +1,5 @@
-use crate::util::get_ext;
 use super::{Builder, Result};
+use crate::util::get_ext;
 use anyhow::Context;
 use jstr::jstr;
 use path_slash::PathBufExt;
@@ -17,28 +17,28 @@ use std::{
 };
 
 static NESTED_EVENTS: &[&str] = &["SignalFlowchart"];
-static TITLE_FLOWS: &[Option<&str>] = &[
-    Some("Demo000_0.bfevfl"),
-    Some("Demo000_2.bfevfl"),
-    Some("Demo001_0.bfevfl"),
-    Some("Demo002_0.bfevfl"),
-    Some("Demo005_0.bfevfl"),
-    Some("Demo006_0.bfevfl"),
-    Some("Demo007_1.bfevfl"),
-    Some("Demo008_1.bfevfl"),
-    Some("Demo008_3.bfevfl"),
-    Some("Demo010_0.bfevfl"),
-    Some("Demo010_1.bfevfl"),
-    Some("Demo011_0.bfevfl"),
-    Some("Demo017_0.bfevfl"),
-    Some("Demo025_0.bfevfl"),
-    Some("Demo042_0.bfevfl"),
-    Some("Demo042_1.bfevfl"),
-    Some("Demo048_0.bfevfl"),
-    Some("Demo048_1.bfevfl"),
-    Some("GetDemo.bfevfl"),
-    Some("OperationGuide.bfevfl"),
-    Some("SDemo_D-6.bfevfl"),
+static TITLE_EVENTS: &[&str] = &[
+    "Demo000_0",
+    "Demo000_2",
+    "Demo001_0",
+    "Demo002_0",
+    "Demo005_0",
+    "Demo006_0",
+    "Demo007_1",
+    "Demo008_1",
+    "Demo008_3",
+    "Demo010_0",
+    "Demo010_1",
+    "Demo011_0",
+    "Demo017_0",
+    "Demo025_0",
+    "Demo042_0",
+    "Demo042_1",
+    "Demo048_0",
+    "Demo048_1",
+    "GetDemo",
+    "OperationGuide",
+    "SDemo_D-6",
 ];
 
 pub(crate) struct Event<'a> {
@@ -87,6 +87,7 @@ impl<'a> Event<'a> {
         let event_flow_root = root.join("EventFlow");
         let as_root = root.join("Actor/AS").join(name);
         let camera_root = root.join("Camera").join(name);
+        let main_exts = [Some(OsStr::new("bfevfl")), Some(OsStr::new("bfevtm"))];
         let files: Vec<PathBuf> = find_subfiles(&event_info)?
             .map(|file| event_flow_root.join(file))
             .chain(
@@ -95,6 +96,10 @@ impl<'a> Event<'a> {
             )
             .chain(find_camera_files(&event_info)?.map(|file| camera_root.join(file)))
             .chain(find_single_files(&event_info, name)?.map(|file| root.join(file)))
+            .filter(|f| {
+                let name = f.file_name().unwrap().to_str().unwrap();
+                !TITLE_EVENTS.iter().any(|e| name.contains(e)) || main_exts.contains(&f.extension())
+            })
             .collect();
         if !files.is_empty()
             && files
@@ -104,8 +109,8 @@ impl<'a> Event<'a> {
             && files
                 .iter()
                 .filter(|f| {
-                    f.extension() == Some(OsStr::new("bfevfl"))
-                        || f.extension() == Some(OsStr::new("bfevtm"))
+                    main_exts.contains(&f.extension())
+                        || f.file_stem().unwrap().to_str().unwrap().ends_with(".bdemo")
                 })
                 .all(|f| f.exists())
         {
@@ -146,10 +151,10 @@ impl<'a> Event<'a> {
             pack.add_file(&filename.to_slash_lossy(), data);
             Ok(())
         })?;
-        self.builder.vprint(&jstr!("Built event {&self.name}"));
         let data = pack.to_binary();
         self.builder
             .set_resource_size(&jstr!("Event/{&self.name}.beventpack"), &data);
+        self.builder.vprint(&jstr!("Built event {&self.name}"));
         Ok(compress(data))
     }
 }
@@ -174,8 +179,7 @@ fn find_subfiles(event_info: &Hash) -> Result<impl Iterator<Item = &str>> {
                         .collect::<Vec<_>>()
                 })
         })
-        .flatten()
-        .filter(|f| !TITLE_FLOWS.contains(&Some(f))))
+        .flatten())
 }
 
 fn find_as_files(event_info: &Hash) -> Result<impl Iterator<Item = &str>> {
