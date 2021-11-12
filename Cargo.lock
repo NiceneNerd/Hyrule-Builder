@@ -598,7 +598,7 @@ dependencies = [
 
 [[package]]
 name = "hyrule-builder"
-version = "0.1.1"
+version = "0.8.1"
 dependencies = [
  "anyhow",
  "botw-utils",
