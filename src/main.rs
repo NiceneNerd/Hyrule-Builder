@@ -1,6 +1,9 @@
 #![feature(option_result_contains)]
-use crate::builder::BuildConfig;
-use anyhow::Result;
+use crate::{
+    builder::BuildConfig,
+    settings::{ConfigCommand, Settings},
+};
+use anyhow::{anyhow, Result};
 use botw_utils::hashes::{Platform, StockHashTable};
 use builder::WarnLevel;
 use colored::*;
@@ -55,10 +58,10 @@ pub(crate) enum Command {
             help = "Comma separated list of custom actors to add to TitleBG.pack, e.g.\n`--title-actors=Weapon_Bow_001,Enemy_Golem_Senior`"
         )]
         title_actors: Vec<String>,
+        #[structopt(help = "Source mod folder to build")]
+        source: Option<PathBuf>,
         #[structopt(long, short, help = "Output folder for built mod")]
         output: Option<PathBuf>,
-        #[structopt(long, short, help = "Source mod folder to build")]
-        source: Option<PathBuf>,
     },
     /// Creates a new source-like mod project
     #[structopt(setting = ColoredHelp, alias = "unbuild")]
@@ -72,11 +75,44 @@ pub(crate) enum Command {
         #[structopt(long, short, help = "Create default config.yml")]
         config: bool,
     },
+    /// Get or set Hyrule Builder configuration parameters
+    #[structopt(setting = ColoredHelp, alias = "conf")]
+    Config(ConfigCommand),
 }
 
 fn main() -> Result<()> {
     let opt = Opt::from_args();
     match opt.command {
+        Command::Config(conf) => {
+            let mut config = Settings::get_settings()?;
+            match conf {
+                ConfigCommand::List { values } => {
+                    config.list(values);
+                }
+                ConfigCommand::Get { setting } => {
+                    config.get(&setting)?;
+                }
+                ConfigCommand::Set { setting, value } => {
+                    config.set(&setting, &value)?;
+                }
+                ConfigCommand::Import {
+                    from_bcml,
+                    from_cemu,
+                    cemu_dir,
+                } => {
+                    if from_cemu && from_bcml {
+                        return Err(anyhow!("Cannot combine `--from-cemu` and `--from-bcml`"));
+                    }
+                    if from_cemu {
+                        config.set_from_cemu(&cemu_dir.unwrap())?;
+                    } else if from_bcml {
+                        config.set_from_bcml()?;
+                    } else {
+                    }
+                }
+            }
+            Ok(())
+        }
         Command::Init {
             be,
             directory,

@@ -751,7 +751,7 @@ impl Builder {
 
     pub(crate) fn build(&mut self) -> Result<()> {
         if !validate_source(&self.source) {
-            return Err(anyhow!("Source folder is not in a supported mod format"));
+            return Err(anyhow!("Source folder is not a Hyrule Builder project"));
         }
         self.load_modified_files()?;
         if self.modified_files.is_empty() {
