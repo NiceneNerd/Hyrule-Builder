@@ -37,10 +37,10 @@ static EXCLUDE_UNPACK: &[&str] = &[
 static EXCLUDE_UNPACK_EXTS: &[&str] = &["baatarc", "sgenvb", "ssarc", "sblarc", "sfarc"];
 
 #[derive(Debug)]
-struct Unbuilder<'a> {
-    be: bool,
-    output: &'a Path,
-    source: PathBuf,
+pub struct Unbuilder<'a> {
+    pub be: bool,
+    pub output: &'a Path,
+    pub source: PathBuf,
 }
 
 #[inline]
@@ -205,7 +205,7 @@ impl Unbuilder<'_> {
         Ok(())
     }
 
-    fn unbuild_actorinfo(&self, file: &Path) -> Result<()> {
+    pub fn unbuild_actorinfo(&self, file: &Path) -> Result<()> {
         println!("Unbuilding actor info...");
         let actorinfo = byml::Byml::from_binary(&yaz0::decompress_if(fs::read(file)?)?)?;
         fs::create_dir_all(self.out_content().join("Actor/ActorInfo"))?;
@@ -375,7 +375,7 @@ impl Unbuilder<'_> {
     }
 }
 
-pub(crate) fn unbuild(
+pub fn unbuild(
     be: bool,
     source: Option<PathBuf>,
     directory: Option<PathBuf>,

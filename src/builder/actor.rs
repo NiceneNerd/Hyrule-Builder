@@ -14,7 +14,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub(crate) static TITLE_ACTORS: &[&str] = &[
+pub static TITLE_ACTORS: &[&str] = &[
     "AncientArrow",
     "Animal_Insect_A",
     "Animal_Insect_B",
@@ -76,7 +76,7 @@ pub(crate) static TITLE_ACTORS: &[&str] = &[
 ];
 
 #[derive(Debug)]
-struct Link {
+pub struct Link {
     path: &'static str,
     ext: &'static str,
 }
@@ -89,7 +89,7 @@ impl Link {
     }
 }
 
-static ACTOR_LINKS: phf::Map<u32, Link> = phf_map! {
+pub static ACTOR_LINKS: phf::Map<u32, Link> = phf_map! {
     3293308145u32 => Link {
         path: "AIProgram",
         ext: "baiprog",
@@ -172,7 +172,7 @@ static ACTOR_LINKS: phf::Map<u32, Link> = phf_map! {
     },
 };
 
-pub(crate) struct Actor<'a> {
+pub struct Actor<'a> {
     builder: &'a super::Builder,
     pub name: String,
     files: Vec<PathBuf>,
@@ -188,7 +188,7 @@ impl<'a> Debug for Actor<'a> {
 }
 
 impl<'a> Actor<'a> {
-    pub(crate) fn new(builder: &'a super::Builder, file: &Path) -> Result<Option<Self>> {
+    pub fn new(builder: &'a super::Builder, file: &Path) -> Result<Option<Self>> {
         let actor_link = ParameterIO::from_text(fs::read_to_string(&file)?)?;
         let root = builder.source_content();
         let files: Vec<PathBuf> = actor_link
@@ -254,7 +254,7 @@ impl<'a> Actor<'a> {
         }
     }
 
-    pub(crate) fn build(self) -> Result<Vec<u8>> {
+    pub fn build(self) -> Result<Vec<u8>> {
         self.builder.vprint(&jstr!("Building actor {&self.name}"));
         let mut pack = SarcWriter::new(self.builder.endian());
         let root = self.builder.source.join(&self.builder.content);

@@ -24,6 +24,6 @@ serde_yaml = "0.8.21"
 structopt = "0.3.23"
 
 [profile.release]
-lto = "fat"
-codegen-units = 1
+# lto = "fat"
+# codegen-units = 1
 panic = "abort"

@@ -6,9 +6,9 @@ use path_slash::PathExt;
 use roead::aamp::ParameterIO;
 use std::path::Path;
 
-pub(crate) static PROCESSED_DIRS: &[&str] = &["Actor", "Event", "Map", "Pack"];
+pub static PROCESSED_DIRS: &[&str] = &["Actor", "Event", "Map", "Pack"];
 
-pub(crate) static UNPROCESSED_DIRS: &[&str] = &[
+pub static UNPROCESSED_DIRS: &[&str] = &[
     "Effect",
     "Font",
     "Game",
@@ -26,7 +26,7 @@ pub(crate) static UNPROCESSED_DIRS: &[&str] = &[
     "UI",
 ];
 
-pub(crate) static EXCLUDE_RSTB: &[&str] = &[
+pub static EXCLUDE_RSTB: &[&str] = &[
     "pack", "bgdata", "txt", "bgsvdata", "yml", "json", "ps1", "bak", "bat", "ini", "png", "bfstm",
     "py", "sh", "old", "stera",
 ];
@@ -39,14 +39,14 @@ lazy_static! {
             .collect();
 }
 
-pub(crate) fn get_ext(file: &Path) -> Result<&str> {
+pub fn get_ext(file: &Path) -> Result<&str> {
     file.extension()
         .ok_or_else(|| format_err!("No extension on {:?}", &file))?
         .to_str()
         .context("Invalid UTF 8 in file extension")
 }
 
-pub(crate) fn parse_aamp(file: &Path) -> Result<ParameterIO> {
+pub fn parse_aamp(file: &Path) -> Result<ParameterIO> {
     if file.extension() == Some(std::ffi::OsStr::new("yml")) {
         Ok(ParameterIO::from_text(std::fs::read_to_string(file)?)
             .with_context(|| jstr!("Failed to parse AAMP file {&file.to_slash_lossy()}"))?)
@@ -57,7 +57,7 @@ pub(crate) fn parse_aamp(file: &Path) -> Result<ParameterIO> {
 }
 
 #[inline]
-pub(crate) fn validate_source(source: &Path) -> bool {
+pub fn validate_source(source: &Path) -> bool {
     source.join("content").exists()
         || source.join("aoc").exists()
         || source.join("01007EF00011E000/romfs").exists()

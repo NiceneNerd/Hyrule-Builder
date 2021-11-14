@@ -1,6 +1,6 @@
-pub(crate) mod actor;
+pub mod actor;
 pub mod config;
-pub(crate) mod event;
+pub mod event;
 
 use super::util::*;
 use crate::{
@@ -31,7 +31,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-pub(crate) type Hash = BTreeMap<String, Byml>;
+pub type Hash = BTreeMap<String, Byml>;
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase")]
@@ -50,7 +50,7 @@ pub enum WarnLevel {
 }
 
 #[derive(Debug)]
-pub(crate) struct Builder {
+pub struct Builder {
     pub be: bool,
     pub source: PathBuf,
     pub output: PathBuf,
@@ -749,7 +749,7 @@ impl Builder {
         Ok(())
     }
 
-    pub(crate) fn build(&mut self) -> Result<()> {
+    pub fn build(&mut self) -> Result<()> {
         if !validate_source(&self.source) {
             return Err(anyhow!("Source folder is not a Hyrule Builder project"));
         }

@@ -3,6 +3,7 @@ use crate::{
     builder::BuildConfig,
     settings::{ConfigCommand, Settings},
 };
+use add::AddCommand;
 use anyhow::{anyhow, Result};
 use botw_utils::hashes::{Platform, StockHashTable};
 use builder::WarnLevel;
@@ -12,11 +13,12 @@ use rstb::ResourceSizeTable;
 use std::{
     collections::{HashMap, HashSet},
     fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 use structopt::{clap::AppSettings::ColoredHelp, StructOpt};
 
+mod add;
 mod builder;
 mod settings;
 mod unbuilder;
@@ -40,8 +42,8 @@ struct Opt {
 
 #[derive(Debug, StructOpt)]
 #[structopt(rename_all = "kebab-case")]
-pub(crate) enum Command {
-    /// Builds a mod from a source-like structure into binary game files
+pub enum Command {
+    /// Build a mod from a source-like structure into binary game files
     /// {n}Note: Flags can be set using a config.yml file. See readme for details.
     #[structopt(setting = ColoredHelp)]
     Build {
@@ -63,7 +65,7 @@ pub(crate) enum Command {
         #[structopt(long, short, help = "Output folder for built mod")]
         output: Option<PathBuf>,
     },
-    /// Creates a new source-like mod project
+    /// Create a new source-like mod project
     #[structopt(setting = ColoredHelp, alias = "unbuild")]
     Init {
         #[structopt(long, short, help = "Use big endian/Wii U mode")]
@@ -78,6 +80,31 @@ pub(crate) enum Command {
     /// Get or set Hyrule Builder configuration parameters
     #[structopt(setting = ColoredHelp, alias = "conf")]
     Config(ConfigCommand),
+    /// Add new content to the active mod project
+    #[structopt(setting = ColoredHelp)]
+    Add {
+        #[structopt(long, short, default_value = ".", help = "Project folder to add to")]
+        project: PathBuf,
+        #[structopt(subcommand)]
+        command: AddCommand,
+    },
+}
+
+fn check_project(project: &Path) -> Result<bool> {
+    if !project.join(".db").exists() {
+        Err(anyhow!(
+            "The specified folder is not a Hyrule Builder project"
+        ))
+    } else if project.join("content").exists() || project.join("aoc").exists() {
+        Ok(true)
+    } else if project.join("01007EF00011E000").exists() || project.join("01007EF00011F001").exists()
+    {
+        Ok(false)
+    } else {
+        Err(anyhow!(
+            "The specified folder is not a valid Hyrule Builder project"
+        ))
+    }
 }
 
 fn main() -> Result<()> {
@@ -244,6 +271,15 @@ fn main() -> Result<()> {
                 },
             }
             .build()
+        }
+        Command::Add { project, command } => {
+            let be = check_project(&project)?;
+            let config = Settings::get_settings()?;
+            match command {
+                AddCommand::Actor { .. } => command.add_actor(project, config, be)?,
+                AddCommand::Actorinfo => command.add_actorinfo(project, config, be)?,
+            };
+            Ok(())
         }
     }
 }

@@ -44,7 +44,7 @@ pub static TITLE_EVENTS: &[&str] = &[
     "SDemo_D-6",
 ];
 
-pub(crate) struct Event<'a> {
+pub struct Event<'a> {
     builder: &'a Builder,
     pub name: String,
     files: HashSet<PathBuf>,
@@ -60,7 +60,7 @@ impl<'a> Debug for Event<'a> {
 }
 
 impl<'a> Event<'a> {
-    pub(crate) fn new(
+    pub fn new(
         builder: &'a Builder,
         file: &Path,
     ) -> Result<(
@@ -133,7 +133,7 @@ impl<'a> Event<'a> {
         }
     }
 
-    pub(crate) fn build(self) -> Result<Vec<u8>> {
+    pub fn build(self) -> Result<Vec<u8>> {
         self.builder
             .vprint(&jstr!("Building event pack {&self.name}"));
         let mut pack = SarcWriter::new(self.builder.endian());
