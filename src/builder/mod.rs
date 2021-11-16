@@ -70,6 +70,7 @@ pub struct Builder {
 }
 
 impl Builder {
+    #[inline]
     fn endian(&self) -> Endian {
         if self.be {
             Endian::Big
@@ -78,6 +79,7 @@ impl Builder {
         }
     }
 
+    #[inline]
     fn vprint(&self, message: &str) {
         if self.verbose {
             println!("{}", message.bright_black());
@@ -218,6 +220,7 @@ impl Builder {
     }
 
     fn load_modified_files(&mut self) -> Result<()> {
+        println!("Scanning project files");
         let db = self.source.join(".db");
         if db.exists() && fs::metadata(&db)?.len() > 1 {
             self.file_times.extend(
@@ -664,31 +667,46 @@ impl Builder {
     }
 
     fn build_misc(&self) -> Result<()> {
-        for root in [&self.aoc, &self.content] {
-            for dir in UNPROCESSED_DIRS {
-                let source_dir = self.source.join(root).join(dir);
-                if source_dir.exists() {
-                    self.modified_files
-                        .par_iter()
-                        .filter(|f| f.starts_with(&source_dir))
-                        .try_for_each(|f| -> Result<()> {
-                            let out = self
-                                .output
-                                .join(root)
-                                .join(dir)
-                                .join(f.strip_prefix(&source_dir)?);
-                            fs::create_dir_all(out.parent().context("No parent???")?)?;
-                            if let Some(canon) = self.get_canon_name(f) {
-                                let data = fs::read(&f)?;
-                                self.set_resource_size(&canon, &data);
-                                fs::write(&out, data)?;
-                            } else {
-                                fs::copy(&f, &out)?;
-                            }
-                            Ok(())
-                        })?;
+        let phys_root = self.source_content().join("Physics");
+        let (phys_hksc, phys_tmrb) = (
+            phys_root.join("StaticCompound"),
+            phys_root.join("TeraMeshRigidBody"),
+        );
+        let misc_files: Vec<&PathBuf> = [&self.aoc, &self.content]
+            .into_iter()
+            .map(|r| {
+                UNPROCESSED_DIRS
+                    .iter()
+                    .map(|d| self.source.join(r).join(d))
+                    .collect::<Vec<PathBuf>>()
+            })
+            .flatten()
+            .map(|s| {
+                self.modified_files
+                    .par_iter()
+                    .filter(|f| f.starts_with(&s))
+                    .collect::<Vec<&PathBuf>>()
+            })
+            .flatten()
+            .filter(|f| {
+                !(f.starts_with(&phys_root)
+                    || (f.starts_with(&phys_hksc) || f.starts_with(&phys_tmrb)))
+            })
+            .collect();
+        if !misc_files.is_empty() {
+            println!("Building {} miscellaneous files", misc_files.len());
+            misc_files.into_par_iter().try_for_each(|f| -> Result<()> {
+                let out = self.output.join(f.strip_prefix(&self.source)?);
+                fs::create_dir_all(out.parent().context("No parent???")?)?;
+                if let Some(canon) = self.get_canon_name(f) {
+                    let data = fs::read(&f)?;
+                    self.set_resource_size(&canon, &data);
+                    fs::write(&out, data)?;
+                } else {
+                    fs::copy(&f, &out)?;
                 }
-            }
+                Ok(())
+            })?;
         }
         Ok(())
     }
@@ -709,6 +727,7 @@ impl Builder {
     }
 
     fn update_db(&mut self) -> Result<()> {
+        println!("Saving state");
         let moment = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_secs();

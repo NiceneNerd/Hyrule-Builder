@@ -13,10 +13,36 @@ use std::{
 };
 use structopt::StructOpt;
 
+pub static AOC_PACKS: &[&str] = &[
+    "AocMainField",
+    "Dungeon120",
+    "Dungeon121",
+    "Dungeon122",
+    "Dungeon123",
+    "Dungeon124",
+    "Dungeon125",
+    "Dungeon126",
+    "Dungeon127",
+    "Dungeon128",
+    "Dungeon129",
+    "Dungeon130",
+    "Dungeon131",
+    "Dungeon132",
+    "Dungeon133",
+    "Dungeon134",
+    "Dungeon135",
+    "Dungeon136",
+    "FinalTrial",
+    "RemainsElectric",
+    "RemainsFire",
+    "RemainsWater",
+    "RemainsWind",
+];
+
 #[derive(Debug, StructOpt)]
 #[structopt(rename_all = "kebab-case")]
 pub enum AddCommand {
-    /// Add an actor to the project, either modifying a vanilla actor or duplicating it as a new one
+    /// Add an actor to the current project, either modifying a vanilla actor or duplicating it as a new one
     Actor {
         #[structopt(help = "Base actor name")]
         base_actor: String,
@@ -29,8 +55,31 @@ pub enum AddCommand {
         )]
         minimal: bool,
     },
-    /// Adds unbuilt actor info to this project
+    /// Adds unbuilt actor info to the current project
     Actorinfo,
+    /// Add a map unit to the current project
+    Map {
+        #[structopt(help = "The section of the map unit to add (e.g. `B-2`)")]
+        unit: String,
+        #[structopt(help = "The map unit type (static or dynamic)")]
+        map_type: String,
+        #[structopt(short, long, help = "Pull the AOC field (Trial of the Sword) map unit")]
+        aocfield: bool,
+    },
+    /// Add an event to the current project, either modifying a vanilla event or duplicating it as a new one
+    Event {
+        #[structopt(help = "Base event name")]
+        base_event: String,
+        #[structopt(help = "New event name")]
+        new_event: Option<String>,
+        #[structopt(long, short, help = "Add only event info, don't duplicate other files")]
+        minimal: bool,
+    },
+    /// Add a root game pack to the mod (e.g. `Bootup.pack`, `AocMainField.pack`, etc.)
+    Pack {
+        #[structopt(help = "Pack to add (`.pack` can be omitted)")]
+        pack: String,
+    },
 }
 
 impl AddCommand {
@@ -149,6 +198,188 @@ impl AddCommand {
         };
         unbuilder.unbuild_actorinfo(&base_path)?;
         println!("Actor info added to project");
+        Ok(())
+    }
+
+    pub fn add_map(&self, project: PathBuf, config: Settings, be: bool) -> Result<()> {
+        if let Self::Map {
+            unit,
+            map_type,
+            aocfield,
+        } = self
+        {
+            let map_type = match map_type.to_lowercase().as_str() {
+                "static" => "Static".to_owned(),
+                "dynamic" => "Dynamic".to_owned(),
+                _ => return Err(anyhow!("Invalid map unit type")),
+            };
+            println!("Loading map...");
+            let map_path = Path::new("Map")
+                .join(if *aocfield { "AocField" } else { "MainField" })
+                .join(&jstr!("{&unit}/{&unit}_{&map_type}.smubin"));
+            let source = if be {
+                config.dlc_dir.or(config.update_dir)
+            } else {
+                config.dlc_dir_nx.or(config.game_dir_nx)
+            }
+            .context("Game directories not set")?
+            .join(&map_path);
+            let mubin = Byml::from_binary(&decompress(fs::read(&source)?)?)?;
+            let out = project
+                .join(if be {
+                    "aoc/0010"
+                } else {
+                    "01007EF00011F001/romfs"
+                })
+                .join(&map_path)
+                .with_extension("smubin.yml");
+            fs::create_dir_all(out.parent().unwrap())?;
+            fs::write(out, mubin.to_text())?;
+            println!("Map {} {} added", &unit, map_type);
+        };
+        Ok(())
+    }
+
+    pub fn add_event(&self, project: PathBuf, config: Settings, be: bool) -> Result<()> {
+        if let Self::Event {
+            base_event,
+            new_event,
+            minimal,
+        } = self
+        {
+            let project = project.join(if be {
+                "content"
+            } else {
+                "01007EF00011E000/romfs"
+            });
+            let base_pack = if be {
+                config.update_dir
+            } else {
+                config.game_dir_nx
+            }
+            .context("Game directory not set")?
+            .join(jstr!("Event/{&base_event}.sbeventpack"));
+            println!("Loading base event pack...");
+            let sarc = Sarc::read(decompress(fs::read(&base_pack).with_context(|| {
+                format!("Base pack not found at {}", base_pack.display())
+            })?)?)?;
+            for (file, data) in sarc
+                .into_files()
+                .into_iter()
+                .filter_map(|(f, d)| f.map(|n| (n, d)))
+            {
+                let (is_yml, out_data) = match &data[..4] {
+                    b"AAMP" => (true, {
+                        ParameterIO::from_binary(&data)?
+                            .to_text()
+                            .as_bytes()
+                            .to_vec()
+                    }),
+                    b"BY\x00\x02" | b"YB\x02\x00" => (
+                        true,
+                        Byml::from_binary(&data)?.to_text().as_bytes().to_vec(),
+                    ),
+                    _ => (false, data),
+                };
+                let file = PathBuf::from(
+                    if new_event.is_some() && !minimal && file.contains(base_event) {
+                        file.replace(base_event, new_event.as_ref().unwrap())
+                    } else {
+                        file
+                    },
+                );
+                let ext = file.extension().unwrap().to_str().unwrap();
+                let out = project.join(if is_yml {
+                    file.with_extension(&jstr!("{ext}.yml"))
+                } else {
+                    file
+                });
+                if !out.exists() {
+                    fs::create_dir_all(out.parent().unwrap())?;
+                    fs::write(&out, &out_data)?;
+                }
+            }
+            if let Some(new_event) = new_event {
+                println!("Cloning base event info...");
+                let eventinfo_root = project.join("Event/EventInfo");
+                if !eventinfo_root.exists() {
+                    return Err(anyhow!("Cannot clone event without event info in mod"));
+                } else {
+                    let mut info = Byml::from_text(
+                        &fs::read_to_string(eventinfo_root.join(&jstr!("{&base_event}.info.yml")))
+                            .context("Base event info not found")?,
+                    )?;
+                    if !minimal {
+                        fn update_names(node: &mut Byml, base_event: &str, new_event: &str) {
+                            match node {
+                                Byml::Array(array) => {
+                                    for child in array.iter_mut() {
+                                        update_names(child, base_event, new_event);
+                                    }
+                                }
+                                Byml::Hash(hash) => {
+                                    for child in hash.values_mut() {
+                                        update_names(child, base_event, new_event);
+                                    }
+                                }
+                                Byml::String(old_value) => {
+                                    if old_value.contains(base_event) {
+                                        *node =
+                                            Byml::String(old_value.replace(base_event, new_event));
+                                    }
+                                }
+                                _ => (),
+                            };
+                        }
+                        update_names(&mut info, base_event, new_event);
+                    }
+                    fs::write(
+                        eventinfo_root.join(&jstr!("{&new_event}.info.yml")),
+                        info.to_text(),
+                    )?;
+                    println!("Successfully cloned {} as {}", base_event, new_event);
+                }
+            } else {
+                println!("Successfully added {}", base_event);
+            }
+        };
+        Ok(())
+    }
+
+    pub fn add_pack(&self, project: PathBuf, config: Settings, be: bool) -> Result<()> {
+        if let Self::Pack { pack } = self {
+            let pack = pack.trim_end_matches(".pack");
+            let rel_path = jstr!("Pack/{pack}.pack");
+            let aoc_pack = AOC_PACKS.contains(&pack);
+            let base_path = match (aoc_pack, be) {
+                (true, true) => config.dlc_dir,
+                (true, false) => config.dlc_dir_nx,
+                (false, true) => config.update_dir,
+                (false, false) => config.game_dir_nx,
+            }
+            .context("Game directory not set")?
+            .join(&rel_path);
+            let sarc = Sarc::read(fs::read(&base_path)?)?;
+            let unbuilder = Unbuilder {
+                be,
+                output: &project,
+                source: PathBuf::new(),
+            };
+            unbuilder.unbuild_sarc(
+                sarc,
+                Some(
+                    &project
+                        .join(match (aoc_pack, be) {
+                            (true, true) => "aoc/0010",
+                            (true, false) => "01007EF00011F001/romfs",
+                            (false, true) => "content",
+                            (false, false) => "01007EF00011E000/romfs",
+                        })
+                        .join(&rel_path),
+                ),
+            )?;
+            println!("{}.pack added to project", &pack);
+        };
         Ok(())
     }
 }

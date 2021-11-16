@@ -276,7 +276,7 @@ impl Unbuilder<'_> {
     //     Ok(())
     // }
 
-    fn unbuild_sarc(&self, sarc: Sarc, output: Option<&Path>) -> Result<()> {
+    pub fn unbuild_sarc(&self, sarc: Sarc, output: Option<&Path>) -> Result<()> {
         let output = output
             .map(|o| o.to_owned())
             .unwrap_or_else(|| self.out_content());

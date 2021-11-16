@@ -278,6 +278,9 @@ fn main() -> Result<()> {
             match command {
                 AddCommand::Actor { .. } => command.add_actor(project, config, be)?,
                 AddCommand::Actorinfo => command.add_actorinfo(project, config, be)?,
+                AddCommand::Map { .. } => command.add_map(project, config, be)?,
+                AddCommand::Event { .. } => command.add_event(project, config, be)?,
+                AddCommand::Pack { .. } => command.add_pack(project, config, be)?,
             };
             Ok(())
         }
