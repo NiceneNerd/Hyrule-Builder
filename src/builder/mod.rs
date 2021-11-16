@@ -712,7 +712,7 @@ impl Builder {
     }
 
     fn build_rstb(&self) -> Result<()> {
-        println!("Building RSTB...");
+        println!("Building RSTB");
         let res_dir = self.output.join(&self.content).join("System/Resource");
         fs::create_dir_all(&res_dir)?;
         fs::write(
