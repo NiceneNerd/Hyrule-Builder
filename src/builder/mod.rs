@@ -521,13 +521,16 @@ impl Builder {
             sarc.set_alignment(fs::read_to_string(align_path)?.parse::<u8>()?);
         }
         if sarc_path.file_name() == Some(std::ffi::OsStr::new("TitleBG.pack")) {
-            for actor in &self.title_actors {
-                let actor_path = jstr!("Actor/Pack/{actor}.sbactorpack");
-                sarc.add_file(
-                    &actor_path,
-                    self.get_resource_data(Path::new(&jstr!("TitleBG.pack/{&actor_path}")))
-                        .with_context(|| jstr!("Missing title actor: {actor}"))?,
-                );
+            for (path, data) in self
+                .compiled
+                .lock()
+                .unwrap()
+                .iter()
+                .filter_map(|(path, data)| {
+                    path.strip_prefix("TitleBG.pack").ok().map(|p| (p, data))
+                })
+            {
+                sarc.add_file(path.to_str().unwrap(), data.clone());
             }
         } else if sarc_path.file_name() == Some(std::ffi::OsStr::new("Bootup.pack")) {
             sarc.add_file(
@@ -841,7 +844,7 @@ mod tests {
 
     #[test]
     fn build_u() {
-        std::fs::remove_dir_all("test/project/build").unwrap();
+        std::fs::remove_dir_all("test/project/build").unwrap_or(());
         std::fs::remove_file("test/project/.db").unwrap_or(());
         Builder {
             be: true,
