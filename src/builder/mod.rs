@@ -533,11 +533,11 @@ impl Builder {
                 sarc.add_file(path.to_str().unwrap(), data.clone());
             }
         } else if sarc_path.file_name() == Some(std::ffi::OsStr::new("Bootup.pack")) {
-            sarc.add_file(
-                "Event/EventInfo.product.sbyml",
-                self.get_resource_data(Path::new("Event/EventInfo.product.sbyml"))
-                    .context("No event info?")?,
-            );
+            if let Ok(data) = self.get_resource_data(Path::new("Event/EventInfo.product.sbyml")) {
+                sarc.add_file("Event/EventInfo.product.sbyml", data);
+            } else if !sarc.contains("Event/EventInfo.product.sbyml") {
+                anyhow::bail!("No event info???")
+            }
         };
         self.modified_files
             .iter()
