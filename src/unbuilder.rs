@@ -6,7 +6,7 @@ use std::{
 
 use super::util::*;
 use anyhow::{anyhow, format_err, Context, Result};
-use jstr::jstr;
+use join_str::jstr;
 use rayon::prelude::*;
 use roead::{sarc::Sarc, *};
 

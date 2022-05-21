@@ -10,7 +10,7 @@ use crate::{
 use anyhow::{anyhow, format_err, Context, Result};
 use botw_utils::{get_canon_name, get_canon_name_without_root, hashes::StockHashTable};
 use colored::*;
-use jstr::jstr;
+use join_str::jstr;
 use path_slash::{PathBufExt, PathExt};
 use rayon::prelude::*;
 use roead::{

@@ -1,6 +1,6 @@
 use crate::util::*;
 use anyhow::{Context, Result};
-use jstr::jstr;
+use join_str::jstr;
 use path_slash::PathBufExt;
 use phf::phf_map;
 use roead::{

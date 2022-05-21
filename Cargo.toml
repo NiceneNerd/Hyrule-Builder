@@ -1,6 +1,6 @@
 [package]
 name = "hyrule-builder"
-version = "0.8.3"
+version = "0.8.4"
 edition = "2021"
 
 [dependencies]
@@ -9,7 +9,7 @@ botw-utils = "0.3.1"
 colored = "2.0.0"
 crc = "2.1.0"
 dirs2 = "3.0.1"
-jstr = { git = "https://github.com/NiceneNerd/jstr" }
+join_str = "0.1.0"
 glob = "0.3.0"
 lazy_static = "1.4.0"
 msyt = { git = "https://github.com/NiceneNerd/msyt", rev = "f5d0c6e33cc8d12d66f1dd0d329ecf00bcbb9c51" }

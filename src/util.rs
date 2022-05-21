@@ -1,6 +1,6 @@
 use anyhow::{format_err, Context, Result};
 pub use botw_utils::extensions::{AAMP_EXTS, BYML_EXTS};
-use jstr::jstr;
+use join_str::jstr;
 use lazy_static::lazy_static;
 use path_slash::PathExt;
 use roead::aamp::ParameterIO;

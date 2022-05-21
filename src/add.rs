@@ -1,6 +1,6 @@
 use crate::{settings::Settings, unbuilder::Unbuilder};
 use anyhow::{anyhow, Context, Result};
-use jstr::jstr;
+use join_str::jstr;
 use roead::{
     aamp::{hash_name, Parameter, ParameterIO},
     byml::Byml,

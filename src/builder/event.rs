@@ -1,7 +1,7 @@
 use super::{Builder, Result};
 use crate::util::get_ext;
 use anyhow::Context;
-use jstr::jstr;
+use join_str::jstr;
 use path_slash::PathBufExt;
 use roead::{
     byml::{Byml, BymlError, Hash},
