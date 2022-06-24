@@ -1,7 +1,7 @@
 use anyhow::{format_err, Context, Result};
 pub use botw_utils::extensions::{AAMP_EXTS, BYML_EXTS};
 use join_str::jstr;
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 use path_slash::PathExt;
 use roead::aamp::ParameterIO;
 use std::path::Path;
@@ -31,13 +31,12 @@ pub static EXCLUDE_RSTB: &[&str] = &[
     "py", "sh", "old", "stera",
 ];
 
-lazy_static! {
-    pub static ref SARC_EXTS: Vec<Option<&'static std::ffi::OsStr>> =
-        botw_utils::extensions::SARC_EXTS
-            .iter()
-            .map(|ext| Some(std::ffi::OsStr::new(ext)))
-            .collect();
-}
+pub static SARC_EXTS: Lazy<Vec<Option<&'static std::ffi::OsStr>>> = Lazy::new(|| {
+    botw_utils::extensions::SARC_EXTS
+        .iter()
+        .map(|ext| Some(std::ffi::OsStr::new(ext)))
+        .collect()
+});
 
 pub fn get_ext(file: &Path) -> Result<&str> {
     file.extension()

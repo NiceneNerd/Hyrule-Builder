@@ -305,8 +305,7 @@ fn process_aslist(aslist_path: &Path) -> Result<Vec<PathBuf>> {
         .filter_map(|def| {
             def.params()
                 .get(&hash_name("Filename"))
-                .map(|p| p.as_string().ok())
-                .flatten()
+                .and_then(|p| p.as_string().ok())
                 .and_then(|p| {
                     if p == "Dummy" {
                         None
@@ -336,8 +335,7 @@ fn process_attcllist(attcllist_path: &Path) -> Result<Vec<PathBuf>> {
         .filter_map(|def| {
             def.params()
                 .get(&hash_name("FileName"))
-                .map(|p| p.as_string().ok())
-                .flatten()
+                .and_then(|p| p.as_string().ok())
                 .and_then(|p| {
                     if p == "Dummy" {
                         None
@@ -367,8 +365,7 @@ fn process_rgconfiglist(rgconfig_path: &Path) -> Result<Vec<PathBuf>> {
         .filter_map(|def| {
             def.params()
                 .get(&hash_name("FileName"))
-                .map(|p| p.as_string().ok())
-                .flatten()
+                .and_then(|p| p.as_string().ok())
                 .and_then(|p| {
                     if p == "Dummy" {
                         None

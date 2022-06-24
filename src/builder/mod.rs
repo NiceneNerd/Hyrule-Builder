@@ -677,20 +677,18 @@ impl Builder {
         );
         let misc_files: Vec<&PathBuf> = [&self.aoc, &self.content]
             .into_iter()
-            .map(|r| {
+            .flat_map(|r| {
                 UNPROCESSED_DIRS
                     .iter()
                     .map(|d| self.source.join(r).join(d))
                     .collect::<Vec<PathBuf>>()
             })
-            .flatten()
-            .map(|s| {
+            .flat_map(|s| {
                 self.modified_files
                     .par_iter()
                     .filter(|f| f.starts_with(&s))
                     .collect::<Vec<&PathBuf>>()
             })
-            .flatten()
             .filter(|f| {
                 !(f.starts_with(&phys_root)
                     || (f.starts_with(&phys_hksc) || f.starts_with(&phys_tmrb)))
