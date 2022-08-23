@@ -1,14 +1,14 @@
+use super::util::*;
+use anyhow::{anyhow, format_err, Context, Result};
+use colored::*;
+use join_str::jstr;
+use rayon::prelude::*;
+use roead::{sarc::Sarc, *};
 use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
 };
-
-use super::util::*;
-use anyhow::{anyhow, format_err, Context, Result};
-use join_str::jstr;
-use rayon::prelude::*;
-use roead::{sarc::Sarc, *};
 
 static BLANK_META: &[u8] = b"\
 Meta:
@@ -61,6 +61,10 @@ fn unbuild_byml(data: &[u8], out: &Path) -> Result<()> {
     Ok(())
 }
 
+const PLATFORM_WARNING: &str = "\
+WARNING: A `content` folder exists but no `--be` flag was set.
+         If nothing is unbuilt, check your platform setting.";
+
 impl Unbuilder<'_> {
     #[inline]
     fn content(&self) -> &str {
@@ -89,11 +93,9 @@ impl Unbuilder<'_> {
         if !validate_source(&self.source) {
             return Err(anyhow!("Source folder is not in a supported mod format"));
         }
-        // let files: Vec<PathBuf> = glob::glob(self.source.join("**/*").to_str().unwrap())
-        //     .unwrap()
-        //     .filter_map(|f| f.ok())
-        //     .filter(|f| f.is_file())
-        //     .collect();
+        if !self.be && self.source.join("content").exists() {
+            println!("{}", PLATFORM_WARNING.yellow());
+        }
         println!("Unbuilding processed files...");
         for dir in PROCESSED_DIRS {
             glob::glob(
