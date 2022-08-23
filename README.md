@@ -183,7 +183,6 @@ especially graphic packs, before. However, the following aspects are unique to H
   actor pack at `Actor/Pack/Enemy_Lizalfos_Geezer.sbactorpack`.
 - Some SARC files which are parsed by standard Nintendo libraries instead of the BOTW resource
   system will not be unbuilt for safety reasons.
-  ```
 
 ## License
 
