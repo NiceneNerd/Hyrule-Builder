@@ -10,7 +10,9 @@ use crate::{
 use anyhow::{anyhow, format_err, Context, Result};
 use botw_utils::{get_canon_name, get_canon_name_without_root, hashes::StockHashTable};
 use colored::*;
+use fs_err as fs;
 use join_str::jstr;
+use parking_lot::RwLock;
 use path_slash::{PathBufExt, PathExt};
 use rayon::prelude::*;
 use roead::{
@@ -21,11 +23,11 @@ use roead::{
     Endian,
 };
 use rstb::ResourceSizeTable;
+use rustc_hash::FxHashMap as HashMap;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, HashSet},
     ffi::OsStr,
-    fs,
     io::Write,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -59,7 +61,7 @@ pub struct Builder {
     pub file_times: HashMap<PathBuf, u64>,
     pub modified_files: HashSet<PathBuf>,
     pub hash_table: StockHashTable,
-    pub compiled: Arc<Mutex<HashMap<PathBuf, Vec<u8>>>>,
+    pub compiled: Arc<RwLock<HashMap<PathBuf, Vec<u8>>>>,
     pub size_table: Arc<Mutex<ResourceSizeTable>>,
     pub title_actors: HashSet<String>,
     pub title_events: HashSet<String>,
@@ -126,75 +128,69 @@ impl Builder {
     }
 
     fn get_resource_data(&self, file: &Path) -> Result<Vec<u8>> {
-        let mut compiled = self.compiled.lock().unwrap();
-        if let Some(data) = compiled.get(file) {
-            Ok(data.clone())
-        } else {
-            let bytes = std::fs::read(&file)
-                .with_context(|| jstr!("Failed to read {file.to_str().unwrap()}"))?;
-            let mut ext = get_ext(file)?;
-            let data = if ext == "yml" {
-                let text = std::str::from_utf8(&bytes)?;
-                if text.len() >= 3 && &text[0..3] == "!io" {
-                    ParameterIO::from_text(text)
-                        .with_context(|| {
-                            jstr!("Failed to parse AAMP file {file.to_str().unwrap()}")
-                        })?
-                        .to_binary()
-                } else {
-                    Byml::from_text(text)
-                        .with_context(|| {
-                            jstr!("Failed to parse BYML file {file.to_str().unwrap()}")
-                        })?
-                        .to_binary(self.endian())
-                }
+        if let Some(data) = self.compiled.read().get(file) {
+            return Ok(data.clone());
+        }
+        let bytes = std::fs::read(&file)
+            .with_context(|| jstr!("Failed to read {file.to_str().unwrap()}"))?;
+        let mut ext = get_ext(file)?;
+        let data = if ext == "yml" {
+            let text = std::str::from_utf8(&bytes)?;
+            if text.len() >= 3 && &text[0..3] == "!io" {
+                ParameterIO::from_text(text)
+                    .with_context(|| jstr!("Failed to parse AAMP file {file.to_str().unwrap()}"))?
+                    .to_binary()
             } else {
-                bytes
-            };
-            if ext == "yml" {
-                ext = file
-                    .file_stem()
-                    .unwrap()
-                    .to_str()
-                    .context("Uh oh")?
-                    .rsplit('.')
-                    .next()
-                    .context("Uh oh")?;
+                Byml::from_text(text)
+                    .with_context(|| jstr!("Failed to parse BYML file {file.to_str().unwrap()}"))?
+                    .to_binary(self.endian())
             }
-            if !EXCLUDE_RSTB.contains(&ext) {
-                let mut size_table = self.size_table.lock().unwrap();
-                if let Some(canon) = self.get_canon_name(Path::new(
-                    file.to_str()
-                        .context("Funky filename")?
-                        .trim_end_matches(".yml"),
-                )) {
-                    if self.hash_table.is_file_modded(&canon, &data, true) {
-                        if let Some(size) = rstb::calc::estimate_from_slice_and_name(
-                            &data,
-                            &canon,
-                            if self.be {
-                                rstb::Endian::Big
-                            } else {
-                                rstb::Endian::Little
-                            },
-                        ) {
-                            if size > size_table.get(canon.as_str()).unwrap_or(0) {
-                                size_table.set(canon.as_str(), size);
-                            };
+        } else {
+            bytes
+        };
+        if ext == "yml" {
+            ext = file
+                .file_stem()
+                .unwrap()
+                .to_str()
+                .context("Uh oh")?
+                .rsplit('.')
+                .next()
+                .context("Uh oh")?;
+        }
+        if !EXCLUDE_RSTB.contains(&ext) {
+            let mut size_table = self.size_table.lock().unwrap();
+            if let Some(canon) = self.get_canon_name(Path::new(
+                file.to_str()
+                    .context("Funky filename")?
+                    .trim_end_matches(".yml"),
+            )) {
+                if self.hash_table.is_file_modded(&canon, &data, true) {
+                    if let Some(size) = rstb::calc::estimate_from_slice_and_name(
+                        &data,
+                        &canon,
+                        if self.be {
+                            rstb::Endian::Big
                         } else {
-                            size_table.remove(canon.as_str());
-                        }
+                            rstb::Endian::Little
+                        },
+                    ) {
+                        if size > size_table.get(canon.as_str()).unwrap_or(0) {
+                            size_table.set(canon.as_str(), size);
+                        };
+                    } else {
+                        size_table.remove(canon.as_str());
                     }
                 }
-            };
-            let data = if &data[0..4] != b"Yaz0" && ext.starts_with('s') && ext != "sarc" {
-                compress(data)
-            } else {
-                data
-            };
-            compiled.insert(file.to_owned(), data.to_vec());
-            Ok(data)
-        }
+            }
+        };
+        let data = if &data[0..4] != b"Yaz0" && ext.starts_with('s') && ext != "sarc" {
+            compress(data)
+        } else {
+            data
+        };
+        self.compiled.write().insert(file.to_owned(), data.to_vec());
+        Ok(data)
     }
 
     fn set_resource_size(&self, entry: &str, data: &[u8]) {
@@ -347,7 +343,7 @@ impl Builder {
                         ))
                     })
                     .collect::<Result<Vec<_>>>()?;
-                self.compiled.lock().unwrap().par_extend(built_title_actors);
+                self.compiled.write().par_extend(built_title_actors);
             }
         }
         Ok(())
@@ -429,8 +425,7 @@ impl Builder {
                 let data = Byml::Hash(event_info).to_binary(self.endian());
                 self.set_resource_size("Event/EventInfo.product.byml", &data);
                 self.compiled
-                    .lock()
-                    .unwrap()
+                    .write()
                     .insert("Event/EventInfo.product.sbyml".into(), compress(data));
             }
             if !event_packs.is_empty() {
@@ -483,7 +478,8 @@ impl Builder {
                     .into_par_iter()
                     .try_for_each(|f| -> Result<()> {
                         let text = fs::read_to_string(&f)?;
-                        let msyt: msyt::Msyt = serde_yaml::from_str(&text)?;
+                        let msyt: msyt::Msyt = serde_yaml::from_str(&text)
+                            .with_context(|| f.to_slash_lossy().to_string())?;
                         message_sarc.lock().unwrap().add_file(
                             &f.strip_prefix(&dir)?
                                 .with_extension("msbt")
@@ -521,15 +517,9 @@ impl Builder {
             sarc.set_alignment(fs::read_to_string(align_path)?.parse::<u8>()?);
         }
         if sarc_path.file_name() == Some(std::ffi::OsStr::new("TitleBG.pack")) {
-            for (path, data) in self
-                .compiled
-                .lock()
-                .unwrap()
-                .iter()
-                .filter_map(|(path, data)| {
-                    path.strip_prefix("TitleBG.pack").ok().map(|p| (p, data))
-                })
-            {
+            for (path, data) in self.compiled.read().iter().filter_map(|(path, data)| {
+                path.strip_prefix("TitleBG.pack").ok().map(|p| (p, data))
+            }) {
                 sarc.add_file(path.to_str().unwrap(), data.clone());
             }
         } else if sarc_path.file_name() == Some(std::ffi::OsStr::new("Bootup.pack")) {
@@ -805,6 +795,7 @@ fn hash_name(name: &str) -> u32 {
 mod tests {
     use super::{Builder, WarnLevel};
     use botw_utils::hashes::{Platform, StockHashTable};
+    use parking_lot::RwLock;
     use rstb::ResourceSizeTable;
     use std::{
         collections::{HashMap, HashSet},
@@ -846,8 +837,8 @@ mod tests {
         std::fs::remove_file("test/project/.db").unwrap_or(());
         Builder {
             be: true,
-            file_times: HashMap::new(),
-            meta: HashMap::new(),
+            file_times: HashMap::default(),
+            meta: HashMap::default(),
             modified_files: HashSet::new(),
             actorinfo: None,
             hash_table: StockHashTable::new(&Platform::WiiU),
@@ -867,7 +858,7 @@ mod tests {
                 .chain(super::event::NESTED_EVENTS.iter())
                 .map(|t| t.to_string())
                 .collect(),
-            compiled: Arc::new(Mutex::new(HashMap::new())),
+            compiled: Arc::new(RwLock::new(HashMap::default())),
             verbose: false,
             warn: WarnLevel::Warn,
         }

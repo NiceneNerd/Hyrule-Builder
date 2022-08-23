@@ -8,11 +8,12 @@ use anyhow::{anyhow, Result};
 use botw_utils::hashes::{Platform, StockHashTable};
 use builder::WarnLevel;
 use colored::*;
+use fs_err as fs;
+use parking_lot::RwLock;
 use roead::yaz0::decompress;
 use rstb::ResourceSizeTable;
 use std::{
     collections::{HashMap, HashSet},
-    fs,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
@@ -187,7 +188,7 @@ fn main() -> Result<()> {
             let meta = config
                 .as_ref()
                 .map(|c| c.meta.clone())
-                .unwrap_or_else(std::collections::HashMap::new);
+                .unwrap_or_else(std::collections::HashMap::default);
             let title_actors = config
                 .as_ref()
                 .and_then(|c| c.options.get("title_actors"))
@@ -200,7 +201,7 @@ fn main() -> Result<()> {
             });
             builder::Builder {
                 be,
-                file_times: HashMap::new(),
+                file_times: HashMap::default(),
                 meta,
                 modified_files: HashSet::new(),
                 actorinfo: None,
@@ -256,7 +257,7 @@ fn main() -> Result<()> {
                     .chain(builder::event::NESTED_EVENTS.iter())
                     .map(|t| t.to_string())
                     .collect(),
-                compiled: Arc::new(Mutex::new(HashMap::new())),
+                compiled: Arc::new(RwLock::new(HashMap::default())),
                 verbose,
                 warn: if hard_warnings {
                     WarnLevel::Error

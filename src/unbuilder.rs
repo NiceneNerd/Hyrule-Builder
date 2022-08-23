@@ -1,12 +1,12 @@
 use super::util::*;
 use anyhow::{anyhow, format_err, Context, Result};
 use colored::*;
+use fs_err as fs;
 use join_str::jstr;
 use rayon::prelude::*;
 use roead::{sarc::Sarc, *};
 use std::{
     collections::BTreeMap,
-    fs,
     path::{Path, PathBuf},
 };
 
@@ -111,8 +111,7 @@ impl Unbuilder<'_> {
                     .to_string_lossy(),
             )?)
             .filter_map(Result::ok)
-            .collect::<Vec<_>>()
-            .into_par_iter()
+            .par_bridge()
             .try_for_each(|f| -> Result<()> {
                 self.unbuild_file(&f)?;
                 Ok(())
@@ -133,8 +132,7 @@ impl Unbuilder<'_> {
                     .to_string_lossy(),
             )?)
             .filter_map(Result::ok)
-            .collect::<Vec<_>>()
-            .into_par_iter()
+            .par_bridge()
             .try_for_each(|f| -> Result<()> {
                 let out = self.output.join(f.strip_prefix(&self.source)?);
                 fs::create_dir_all(out.parent().context("No parent???")?)?;
@@ -262,22 +260,6 @@ impl Unbuilder<'_> {
         Ok(())
     }
 
-    // fn unbuild_questpack(&self, data: &[u8]) -> Result<()> {
-    //     println!("Unbuilding quest info...");
-    //     let mut questpack = byml::Byml::from_binary(&yaz0::decompress(data)?)?;
-    //     fs::create_dir_all(self.content().join("Quest"))?;
-    //     questpack
-    //         .as_mut_array()?
-    //         .into_par_iter()
-    //         .try_for_each(|q| -> Result<()> {
-    //             let quest = q.as_mut_hash()?;
-    //             let name = jstr!(r#"{quest.remove("Name").unwrap().as_string()?}.info.yml"#);
-    //             fs::write(self.content().join("Quest").join(name), q.to_text())?;
-    //             Ok(())
-    //         })?;
-    //     Ok(())
-    // }
-
     pub fn unbuild_sarc(&self, sarc: Sarc, output: Option<&Path>) -> Result<()> {
         let output = output
             .map(|o| o.to_owned())
@@ -310,8 +292,6 @@ impl Unbuilder<'_> {
                 } else if BYML_EXTS.contains(&ext) {
                     if name.ends_with("EventInfo.product.sbyml") {
                         self.unbuild_eventinfo(file.data())?;
-                    // } else if name.ends_with("questpack") {
-                    //     self.unbuild_questpack(file.data())?;
                     } else {
                         let out = out.with_extension(jstr!("{ext}.yml"));
                         unbuild_byml(file.data(), &out)?;
