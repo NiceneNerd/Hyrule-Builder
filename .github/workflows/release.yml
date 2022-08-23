@@ -4,22 +4,31 @@ on:
 
 jobs:
   release:
-    name: Release ${{ matrix.target }}
-    runs-on: ubuntu-latest
+    name: Release ${{ matrix.platform.name }}
+    runs-on: ${{ matrix.platform.os }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - target: x86_64-pc-windows-msvc
-            archive: zip
-          - target: x86_64-unknown-linux-gnu
-            archive: tar.gz tar.xz
+        platform:
+          - os: ubuntu-latest
+            name: linux
+            ext: ~
+          - os: windows-latest
+            name: windows
+            ext: .exe
     steps:
       - uses: actions/checkout@master
-      - name: Compile and release
-        uses: rust-build/rust-build.action@v1.3.2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
         with:
-          RUSTTARGET: ${{ matrix.target }}
-          ARCHIVE_TYPES: ${{ matrix.archive }}
+          toolchain: nightly
+      - name: Build
+        run: cargo build --release
+      - uses: Shopify/upload-to-release@v1.0.1
+        name: Upload artifacts
+        with:
+          name: hyrule_builder_${{ matrix.platform.name }}${{ matrix.platform.ext }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          path: target/release/hyrule_builder${{ matrix.platform.ext }}
+    env:
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
