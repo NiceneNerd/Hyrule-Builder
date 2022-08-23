@@ -2,6 +2,7 @@
 name = "hyrule-builder"
 version = "0.9.0"
 edition = "2021"
+readme = "README.md"
 
 [dependencies]
 anyhow = "1.0.44"
