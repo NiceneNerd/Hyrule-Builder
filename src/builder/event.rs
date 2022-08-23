@@ -141,7 +141,7 @@ impl<'a> Event<'a> {
         self.files.into_iter().try_for_each(|f| -> Result<()> {
             let mut filename = f
                 .strip_prefix(&root)
-                .with_context(|| f.to_slash_lossy())?
+                .with_context(|| f.to_slash_lossy().to_string())?
                 .to_owned();
             if !f.exists() {
                 if !self

@@ -1,6 +1,6 @@
 [package]
 name = "hyrule-builder"
-version = "0.8.5"
+version = "0.9.0"
 edition = "2021"
 
 [dependencies]
@@ -13,14 +13,14 @@ join_str = "0.1.0"
 glob = "0.3.0"
 msyt = { git = "https://github.com/NiceneNerd/msyt", rev = "f5d0c6e33cc8d12d66f1dd0d329ecf00bcbb9c51" }
 once_cell = "1.12.0"
-path-slash = "0.1.4"
-phf = { version = "0.10.0", features = ["macros"] }
+path-slash = "0.2.1"
+phf = { version = "0.11.0", features = ["macros"] }
 rayon = "1.5.1"
 roead = "0.10.4"
 rstb = { version = "0.3.2", features = ["botw-data", "json"] }
 serde = { version = "1.0.130", features = ["derive"] }
 serde_json = "1.0.70"
-serde_yaml = "0.8.21"
+serde_yaml = "0.9.10"
 structopt = "0.3.23"
 
 [profile.release]
