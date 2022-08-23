@@ -23,12 +23,12 @@ jobs:
         with:
           toolchain: nightly
       - name: Build
-        run: cargo build --release
+        run: cargo +nightly build --release
       - uses: Shopify/upload-to-release@v1.0.1
         name: Upload artifacts
         with:
           name: hyrule_builder_${{ matrix.platform.name }}${{ matrix.platform.ext }}
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-          path: target/release/hyrule_builder${{ matrix.platform.ext }}
+          path: target/release/hyrule-builder${{ matrix.platform.ext }}
     env:
       CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
