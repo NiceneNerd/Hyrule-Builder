@@ -38,5 +38,6 @@ setup(
         'pymsyt>=0.3.2,<0.4.0',
         'rstb>=1.2.1',
         'xxhash~=1.4.3'
+        'botw_havok>=0.3.17'
     ]
 )

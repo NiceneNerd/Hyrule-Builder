@@ -15,10 +15,12 @@ from oead.yaz0 import decompress  # pylint: disable=import-error
 import pymsyt
 from rstb import ResourceSizeTable
 from rstb.util import read_rstb
+from botw_havok import Havok
 
 from . import (
     AAMP_EXTS,
     BYML_EXTS,
+    HAVOK_EXTS,
     SARC_EXTS,
     STOCK_FILES,
     get_canon_name,
@@ -50,6 +52,10 @@ def _unbuild_file(
         of.with_suffix(f"{f.suffix}.yml").write_bytes(_aamp_to_yml(f.read_bytes()))
     elif f.suffix in BYML_EXTS:
         of.with_suffix(f"{f.suffix}.yml").write_bytes(_byml_to_yml(f.read_bytes()))
+    elif f.suffix in HAVOK_EXTS:
+        hk = Havok.from_bytes(f.read_bytes(), f)
+        hk.deserialize()
+        hk.to_json(of.with_suffix(f"{f.suffix}.yml"), True)
     elif f.suffix in SARC_EXTS:
         with f.open("rb") as file:
             data = file.read()
@@ -134,7 +140,12 @@ def _unbuild_actorpack(s: oead.Sarc, output: Path):
     }:
         out = output / f.name
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_bytes(f.data)
+        if Path(f.name).suffix in HAVOK_EXTS:
+            hk = Havok.from_bytes(f.data, f.name)
+            hk.deserialize()
+            hk.to_json(out.with_suffix(f"{out.suffix}.json"), True)
+        else:
+            out.write_bytes(f.data)
     return {f.name for f in s.get_files()}
 
 
@@ -186,6 +197,12 @@ def _unbuild_sarc(
             osf.with_suffix(f"{osf.suffix}.yml").write_bytes(
                 _byml_to_yml(sarc_file.data)
             )
+        elif ext in HAVOK_EXTS:
+            if osf.with_suffix(f"{osf.suffix}.json").exists():
+                continue
+            hk = Havok.from_bytes(sarc_file.data)
+            hk.deserialize()
+            hk.to_json(osf.with_suffix(f"{osf.suffix}.json"))
         else:
             osf.write_bytes(sarc_file.data)
 

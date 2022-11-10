@@ -183,6 +183,14 @@ RSTB_EXCLUDE_EXTS = {
     ".old",
     ".stera",
 }
+HAVOK_EXTS = {
+    ".hksc",
+    ".shksc",
+    ".hkrb",
+    ".shkrb",
+    ".hktmrb",
+    ".shktmrb",
+}
 RSTB_EXCLUDE_NAMES = {"ActorInfo.product.byml", ".done"}
 EXEC_DIR = Path(os.path.dirname(os.path.realpath(__file__)))
 NAMES = Path.home() / ".hybuild" / "names.json"

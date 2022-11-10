@@ -16,10 +16,12 @@ import oead.aamp
 from oead.yaz0 import compress
 import pymsyt
 from rstb import ResourceSizeTable, SizeCalculator
+from botw_havok import Havok
 
 from . import (
     AAMP_EXTS,
     BYML_EXTS,
+    HAVOK_EXTS,
     EXEC_DIR,
     SARC_EXTS,
     STOCK_FILES,
@@ -255,6 +257,36 @@ class ModBuilder:
             else:
                 self.warning(f"Unknown YAML file {f.name}")
                 return {}
+            t.write_bytes(data if not t.suffix.startswith(".s") else compress(data))
+            canon = get_canon_name(t.relative_to(self.out))
+            if self.table.is_file_modded(canon, data) and _should_rstb(t):
+                return {canon: self._get_rstb_val(t.name.replace(".s", "."), data)}
+        except Exception as e:  # pylint: disable=broad-except
+            raise RuntimeError(
+                f"Failed to build {f.relative_to(self.mod).as_posix()}. {e}"
+            )
+        if self.verbose:
+            print(f"Built {f.relative_to(self.mod).as_posix()}")
+        return rv
+
+    def _build_json(self, f: Path):
+        rv = {}
+        if f.name == "config.yml":
+            return rv
+        try:
+            ext = f.with_suffix("").suffix
+            t = self.out / f.relative_to(self.mod).with_suffix("")
+            if not t.parent.exists():
+                t.parent.mkdir(parents=True, exist_ok=True)
+            data: bytes
+            if ext in HAVOK_EXTS:
+                hk = Havok.from_json(f)
+                if params.be:
+                    hk.to_wiiu()
+                else:
+                    hk.to_switch()
+                hk.serialize()
+                data = hk.to_bytes()
             t.write_bytes(data if not t.suffix.startswith(".s") else compress(data))
             canon = get_canon_name(t.relative_to(self.out))
             if self.table.is_file_modded(canon, data) and _should_rstb(t):
@@ -530,8 +562,9 @@ class ModBuilder:
             and "build" not in f.parts
             and not str(f.relative_to(self.mod)).startswith(".")
         }
-        other_files = {f for f in files if f.suffix not in {".yml", ".msyt"}}
+        other_files = {f for f in files if f.suffix not in {".yml", ".msyt", ".json"}}
         yml_files = {f for f in files if f.suffix == ".yml"}
+        json_files = {f for f in files if f.suffix == ".json"}
         f: Path
         rvs = {}
         if not self.single:
@@ -566,6 +599,19 @@ class ModBuilder:
         else:
             try:
                 results = p.map(self._build_yml, yml_files)
+            except RuntimeError as err:
+                print(err)
+                sys.exit(1)
+            for r in results:
+                rvs.update(r)
+
+        print("Building JSON files...")
+        if args.single or len(json_files) < 2:
+            for f in json_files:
+                rvs.update(self._build_json(f))
+        else:
+            try:
+                results = p.map(self._build_json, json_files)
             except RuntimeError as err:
                 print(err)
                 sys.exit(1)
