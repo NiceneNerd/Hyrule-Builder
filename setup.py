@@ -33,11 +33,11 @@ setup(
     ],
     python_requires='>=3.7',
     install_requires=[
-        'botw-utils>=0.2.2',
-        'oead>=0.11.2',
-        'pymsyt>=0.1.4',
-        'rstb>=1.1.3',
-        'xxhash>=1.3.0',
+        'botw-utils>=0.2.3',
+        'oead~=1.2.0',
+        'pymsyt>=0.3.2,<0.4.0',
+        'rstb>=1.2.1',
+        'xxhash~=1.4.3'
         'botw_havok>=0.3.17'
     ]
 )

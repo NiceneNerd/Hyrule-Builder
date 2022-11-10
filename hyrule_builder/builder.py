@@ -117,6 +117,24 @@ def _should_rstb(f: Path) -> bool:
     f = f.with_suffix(f.suffix.replace(".s", "."))
     return f.suffix not in RSTB_EXCLUDE_EXTS and f.name not in RSTB_EXCLUDE_NAMES
 
+def load_rstb(be: bool, file: Path = None) -> ResourceSizeTable:
+    table = ResourceSizeTable(b"", be)
+    if not file:
+        ver = "wiiu" if be else "switch"
+        file = EXEC_DIR / "data" / ver / "rstb.json"
+    ref_contents = json.loads(file.read_text(encoding="utf-8"))
+
+    def parse_hash(file: str) -> int:
+        try:
+            return int(file)
+        except ValueError:
+            return crc32(file.encode("utf8"))
+
+    table.crc32_map = {
+        parse_hash(k): v for k, v in ref_contents["hash_map"].items()
+    }
+    table.name_map = {k: v for k, v in ref_contents["name_map"].items()}
+    return table
 
 class ModBuilder:
     mod: Path
@@ -170,23 +188,7 @@ class ModBuilder:
             print(f"WARNING: {msg}")
 
     def load_rstb(self, file: Path = None) -> ResourceSizeTable:
-        table = ResourceSizeTable(b"", be=self.be)
-        if not file:
-            ver = "wiiu" if be else "switch"
-            file = EXEC_DIR / "data" / ver / "rstb.json"
-        ref_contents = json.loads(file.read_text(), encoding="utf-8")
-
-        def parse_hash(file: str) -> int:
-            try:
-                return int(file)
-            except ValueError:
-                return crc32(file.encode("utf8"))
-
-        table.crc32_map = {
-            parse_hash(k): v for k, v in ref_contents["hash_map"].items()
-        }
-        table.name_map = {k: v for k, v in ref_contents["name_map"].items()}
-        return table
+        return load_rstb(self.be, file)
 
     def _get_rstb_val(self, name: str, data: bytes) -> int:
         ext = name[name.rindex(".") :]
@@ -227,14 +229,16 @@ class ModBuilder:
         return {}
 
     def _build_byml(self, f: Path) -> bytes:
-        return bytes(
-            oead.byml.to_binary(
-                oead.byml.from_text(f.read_text("utf-8")), big_endian=self.be
-            )
-        )
+        in_data = oead.byml.from_text(f.read_text("utf-8"))
+        out_data = bytes(oead.byml.to_binary(in_data, big_endian=self.be))
+        del in_data
+        return out_data
 
     def _build_aamp(self, f: Path) -> bytes:
-        return bytes(oead.aamp.ParameterIO.from_text(f.read_text("utf-8")).to_binary())
+        pio = oead.aamp.ParameterIO.from_text(f.read_text("utf-8"))
+        data = pio.to_binary()
+        del pio
+        return bytes(data)
 
     def _build_yml(self, f: Path):
         rv = {}
@@ -250,6 +254,9 @@ class ModBuilder:
                 data = self._build_byml(f)
             elif ext in AAMP_EXTS:
                 data = self._build_aamp(f)
+            else:
+                self.warning(f"Unknown YAML file {f.name}")
+                return {}
             t.write_bytes(data if not t.suffix.startswith(".s") else compress(data))
             canon = get_canon_name(t.relative_to(self.out))
             if self.table.is_file_modded(canon, data) and _should_rstb(t):
@@ -292,7 +299,7 @@ class ModBuilder:
             print(f"Built {f.relative_to(self.mod).as_posix()}")
         return rv
 
-    def _parse_actor_link(self, link: Path) -> {}:
+    def _parse_actor_link(self, link: Path) -> dict:
         actor_name = link.stem
         if link.suffix == ".yml":
             actor = oead.aamp.ParameterIO.from_text(link.read_text("utf-8"))
@@ -561,7 +568,7 @@ class ModBuilder:
         f: Path
         rvs = {}
         if not self.single:
-            p = Pool()
+            p = Pool(maxtasksperchild=256)
 
         print("Copying miscellaneous files...")
         if self.single or len(other_files) < 2:
@@ -582,10 +589,8 @@ class ModBuilder:
                 print("Building MSBT files...")
             for d in msg_dirs:
                 msg_dir = next(d.glob("Message/*"))
-                new_dir = self.out / msg_dir.relative_to(self.mod).with_suffix(
-                    ".ssarc.ssarc"
-                )
-                pymsyt.create(msg_dir, new_dir)
+                new_dir = self.out / msg_dir.relative_to(self.mod).with_suffix(".ssarc")
+                pymsyt.create(str(msg_dir), self.be, output=str(new_dir))
 
         print("Building AAMP and BYML files...")
         if self.single or len(yml_files) < 2:
@@ -721,15 +726,12 @@ class ModBuilder:
         if self.meta:
             with (self.out / "rules.txt").open("w", encoding="utf-8") as rules:
                 rules.write("[Definition]\n")
-                rules.write(
-                    "titleIds = 00050000101C9300,00050000101C9400,00050000101C9500\n"
-                )
-                for key, val in meta.items():
+                if "path" not in self.meta and "name" in self.meta:
+                    self.meta["path"] = f"The Legend of Zelda: Breath of the Wild/Mods/{self.meta['name']}"
+                if "titleIds" not in self.meta:
+                    self.meta["titleIds"] = "00050000101C9300,00050000101C9400,00050000101C9500"
+                for key, val in self.meta.items():
                     rules.write(f"{key} = {val}\n")
-                if "path" not in meta and "name" in meta:
-                    rules.write(
-                        f"path = The Legend of Zelda: Breath of the Wild/Mods/{meta['name']}\n"
-                    )
                 rules.write("version = 4\n")
 
 
