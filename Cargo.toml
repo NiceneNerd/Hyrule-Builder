@@ -1,14 +1,14 @@
 [package]
 name = "hyrule-builder"
-version = "0.9.0"
+version = "0.10.0"
 edition = "2021"
 readme = "README.md"
 
 [dependencies]
 anyhow = "1.0.44"
-botw-utils = "0.3.1"
+botw-utils = "0.5.0"
 colored = "2.0.0"
-crc = "2.1.0"
+crc = "3.2.1"
 dirs2 = "3.0.1"
 fs-err = "2.8.1"
 join_str = "0.1.0"
@@ -19,12 +19,13 @@ path-slash = "0.2.1"
 parking_lot = "0.12.1"
 phf = { version = "0.11.0", features = ["macros"] }
 rayon = "1.5.1"
-roead = "0.10.4"
-rustc-hash = "1.1.0"
-rstb = { version = "0.3.2", features = ["botw-data", "json"] }
+roead = { version = "0.25.3", features = ["yaml"] }
+rustc-hash = "2.0.0"
+rstb = { version = "0.8.1", features = ["botw-data", "json"] }
+smartstring = "1.0.1"
 serde = { version = "1.0.130", features = ["derive"] }
 serde_json = "1.0.70"
-serde_yaml = "0.8.26"
+serde_yml = "0.0.10"
 structopt = "0.3.23"
 
 [profile.release]

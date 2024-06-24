@@ -1,4 +1,3 @@
-#![feature(option_result_contains)]
 use crate::{
     builder::BuildConfig,
     settings::{ConfigCommand, Settings},
@@ -135,7 +134,6 @@ fn main() -> Result<()> {
                         config.set_from_cemu(&cemu_dir.unwrap())?;
                     } else if from_bcml {
                         config.set_from_bcml()?;
-                    } else {
                     }
                 }
             }
@@ -155,9 +153,11 @@ fn main() -> Result<()> {
             title_actors,
             source,
         } => {
-            let source = source.unwrap_or_else(|| PathBuf::from("./"));
+            let source = source.unwrap_or_else(|| {
+                std::env::current_dir().expect("There's no current working directory")
+            });
             let config: Option<BuildConfig> = if source.join("config.yml").exists() {
-                Some(serde_yaml::from_reader(&std::fs::File::open(
+                Some(serde_yml::from_reader(&std::fs::File::open(
                     source.join("config.yml"),
                 )?)?)
             } else {
@@ -185,10 +185,7 @@ fn main() -> Result<()> {
                 .map(PathBuf::from)
                 .or(output)
                 .unwrap_or_else(|| source.join("build"));
-            let meta = config
-                .as_ref()
-                .map(|c| c.meta.clone())
-                .unwrap_or_else(std::collections::HashMap::default);
+            let meta = config.as_ref().map(|c| c.meta.clone()).unwrap_or_default();
             let title_actors = config
                 .as_ref()
                 .and_then(|c| c.options.get("title_actors"))

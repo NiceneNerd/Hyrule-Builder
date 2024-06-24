@@ -4,7 +4,7 @@ use anyhow::Context;
 use join_str::jstr;
 use path_slash::PathBufExt;
 use roead::{
-    byml::{Byml, BymlError, Hash},
+    byml::{Byml, Map},
     sarc::SarcWriter,
     yaz0::compress,
 };
@@ -64,7 +64,7 @@ impl<'a> Event<'a> {
         builder: &'a Builder,
         file: &Path,
     ) -> Result<(
-        std::collections::btree_map::IntoIter<String, Byml>,
+        std::collections::hash_map::IntoIter<smartstring::alias::String, roead::byml::Byml>,
         Option<Self>,
     )> {
         let name = file
@@ -73,16 +73,20 @@ impl<'a> Event<'a> {
             .to_str()
             .unwrap()
             .trim_end_matches(".info");
-        let event_info: Hash = {
-            if let Byml::Hash(hash) = Byml::from_text(fs::read_to_string(&file)?)? {
-                Ok(hash
-                    .into_iter()
-                    .map(|(k, v)| (jstr!("{name}<{&k}>"), v))
-                    .collect())
-            } else {
-                Err(BymlError::TypeError)
-            }
-        }?;
+        let event_info: Map = Byml::from_text(
+            fs::read_to_string(file)
+                .with_context(|| format!("Failed to read event file at {}", file.display()))?,
+        )
+        .with_context(|| format!("Failed to parse YAML at {}", file.display()))?
+        .into_map()?
+        .into_iter()
+        .map(|(mut k, v)| {
+            k.insert_str(0, name);
+            k.insert(name.len(), '<');
+            k.push('>');
+            (k, v)
+        })
+        .collect();
         if builder.title_events.contains(name) {
             return Ok((event_info.into_iter(), None));
         }
@@ -161,7 +165,7 @@ impl<'a> Event<'a> {
                 filename = filename.with_extension("");
             }
             let data = self.builder.get_resource_data(&f)?;
-            pack.add_file(&filename.to_slash_lossy(), data);
+            pack.add_file(filename.to_slash_lossy(), data);
             Ok(())
         })?;
         let data = pack.to_binary();
@@ -172,11 +176,11 @@ impl<'a> Event<'a> {
     }
 }
 
-fn find_subfiles(event_info: &Hash) -> Result<impl Iterator<Item = &str>> {
+fn find_subfiles(event_info: &Map) -> Result<impl Iterator<Item = &str>> {
     Ok(event_info
         .values()
         .filter_map(|info| {
-            info.as_hash()
+            info.as_map()
                 .ok()
                 .and_then(|hash| hash.get("subfile"))
                 .and_then(|subfiles| subfiles.as_array().ok())
@@ -184,10 +188,10 @@ fn find_subfiles(event_info: &Hash) -> Result<impl Iterator<Item = &str>> {
                     subfiles
                         .iter()
                         .filter_map(|file| {
-                            file.as_hash()
+                            file.as_map()
                                 .ok()
                                 .and_then(|file_hash| file_hash.get("file"))
-                                .and_then(|file_val| file_val.as_string().ok())
+                                .and_then(|file_val| file_val.as_string().ok().map(|s| s.as_str()))
                         })
                         .collect::<Vec<_>>()
                 })
@@ -195,11 +199,11 @@ fn find_subfiles(event_info: &Hash) -> Result<impl Iterator<Item = &str>> {
         .flatten())
 }
 
-fn find_as_files(event_info: &Hash) -> Result<impl Iterator<Item = &str>> {
+fn find_as_files(event_info: &Map) -> Result<impl Iterator<Item = &str>> {
     Ok(event_info
         .values()
         .filter_map(|info| {
-            info.as_hash()
+            info.as_map()
                 .ok()
                 .and_then(|hash| hash.get("as"))
                 .and_then(|subfiles| subfiles.as_array().ok())
@@ -207,10 +211,10 @@ fn find_as_files(event_info: &Hash) -> Result<impl Iterator<Item = &str>> {
                     subfiles
                         .iter()
                         .filter_map(|file| {
-                            file.as_hash()
+                            file.as_map()
                                 .ok()
                                 .and_then(|file_hash| file_hash.get("file"))
-                                .and_then(|file_val| file_val.as_string().ok())
+                                .and_then(|file_val| file_val.as_string().ok().map(|s| s.as_str()))
                         })
                         .collect::<Vec<_>>()
                 })
@@ -218,11 +222,11 @@ fn find_as_files(event_info: &Hash) -> Result<impl Iterator<Item = &str>> {
         .flatten())
 }
 
-fn find_camera_files(event_info: &Hash) -> Result<impl Iterator<Item = &str>> {
+fn find_camera_files(event_info: &Map) -> Result<impl Iterator<Item = &str>> {
     Ok(event_info
         .values()
         .filter_map(|info| {
-            info.as_hash()
+            info.as_map()
                 .ok()
                 .and_then(|hash| hash.get("camera"))
                 .and_then(|subfiles| subfiles.as_array().ok())
@@ -230,10 +234,10 @@ fn find_camera_files(event_info: &Hash) -> Result<impl Iterator<Item = &str>> {
                     subfiles
                         .iter()
                         .filter_map(|file| {
-                            file.as_hash()
+                            file.as_map()
                                 .ok()
                                 .and_then(|file_hash| file_hash.get("file"))
-                                .and_then(|file_val| file_val.as_string().ok())
+                                .and_then(|file_val| file_val.as_string().ok().map(|s| s.as_str()))
                         })
                         .collect::<Vec<_>>()
                 })
@@ -241,14 +245,14 @@ fn find_camera_files(event_info: &Hash) -> Result<impl Iterator<Item = &str>> {
         .flatten())
 }
 
-fn find_single_files(event_info: &Hash, name: &str) -> Result<impl Iterator<Item = PathBuf>> {
+fn find_single_files(event_info: &Map, name: &str) -> Result<impl Iterator<Item = PathBuf>> {
     let mut files: HashSet<PathBuf> = HashSet::with_capacity(1);
     if name == "Demo614_2" {
         // Hack because I have no idea why `Demo614_2.sbeventpack` has a timeline
         files.insert("EventFlow/Demo614_2.bfevtm".into());
     }
     for subevent in event_info.values() {
-        let subevent = subevent.as_hash()?;
+        let subevent = subevent.as_map()?;
         if let Some(Byml::Bool(has_demo)) = subevent.get("demo_event") {
             if *has_demo {
                 files.insert(jstr!("Demo/{name}.bdemo.yml").into());

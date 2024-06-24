@@ -19,20 +19,26 @@ impl<T: Send> ParallelExtend<Option<T>> for OnlySome<T> {
     }
 }
 
-pub fn unzip_some<I, K: Send + Ord, V: Send, U: Send>(
+pub fn unzip_some<
+    I,
+    K: Send + Ord + std::hash::Hash,
+    V: Send,
+    U: Send,
+    S: std::hash::BuildHasher + Default,
+>(
     par_iter: I,
-) -> (std::collections::BTreeMap<K, V>, Vec<U>)
+) -> (std::collections::HashMap<K, V, S>, Vec<U>)
 where
     // let's assume we've already mapped to options
     I: ParallelIterator<
         Item = (
-            Option<std::collections::btree_map::IntoIter<K, V>>,
+            Option<std::collections::hash_map::IntoIter<K, V>>,
             Option<U>,
         ),
     >,
 {
     let (some_ts, some_us): (
-        OnlySome<std::collections::btree_map::IntoIter<K, V>>,
+        OnlySome<std::collections::hash_map::IntoIter<K, V>>,
         OnlySome<U>,
     ) = par_iter.unzip();
     (some_ts.0.into_iter().flatten().collect(), some_us.0)

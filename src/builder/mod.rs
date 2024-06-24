@@ -17,7 +17,7 @@ use path_slash::{PathBufExt, PathExt};
 use rayon::prelude::*;
 use roead::{
     aamp::ParameterIO,
-    byml::Byml,
+    byml::{Byml, Map},
     sarc::{Sarc, SarcWriter},
     yaz0::compress,
     Endian,
@@ -131,7 +131,7 @@ impl Builder {
         if let Some(data) = self.compiled.read().get(file) {
             return Ok(data.clone());
         }
-        let bytes = std::fs::read(&file)
+        let bytes = std::fs::read(file)
             .with_context(|| jstr!("Failed to read {file.to_str().unwrap()}"))?;
         let mut ext = get_ext(file)?;
         let data = if ext == "yml" {
@@ -328,7 +328,7 @@ impl Builder {
                     .into_par_iter()
                     .try_for_each(|a| -> Result<()> {
                         std::fs::write(
-                            output_pack_dir.join(&jstr!("{&a.name}.sbactorpack")),
+                            output_pack_dir.join(jstr!("{&a.name}.sbactorpack")),
                             a.build()?,
                         )?;
                         Ok(())
@@ -352,9 +352,9 @@ impl Builder {
     fn build_actorinfo(&mut self) -> Result<()> {
         if let Some(actorinfo) = self.actorinfo.take() {
             println!("Building actor info");
-            let mut info = Hash::new();
+            let mut info = roead::byml::Map::default();
             info.insert(
-                "Hashes".to_owned(),
+                "Hashes".into(),
                 Byml::Array({
                     let mut hashes: Vec<_> = actorinfo.keys().map(|n| hash_name(n)).collect();
                     hashes.sort_unstable();
@@ -362,27 +362,27 @@ impl Builder {
                         .into_par_iter()
                         .map(|hash| {
                             if hash < 2147483648 {
-                                Byml::Int(hash as i32)
+                                Byml::I32(hash as i32)
                             } else {
-                                Byml::UInt(hash)
+                                Byml::U32(hash)
                             }
                         })
                         .collect()
                 }),
             );
             info.insert(
-                "Actors".to_owned(),
+                "Actors".into(),
                 Byml::Array({
                     let mut actors: Vec<_> = actorinfo.into_par_iter().map(|(_, a)| a).collect();
                     actors.sort_unstable_by_key(|a| {
-                        hash_name(a.as_hash().unwrap()["name"].as_string().unwrap())
+                        hash_name(a.as_map().unwrap()["name"].as_string().unwrap())
                     });
                     actors
                 }),
             );
             fs::write(
                 self.out_content().join("Actor/ActorInfo.product.sbyml"),
-                compress(Byml::Hash(info).to_binary(self.endian())),
+                compress(Byml::Map(info).to_binary(self.endian())),
             )?;
         }
         Ok(())
@@ -401,14 +401,17 @@ impl Builder {
                         .map(|f| f.file_stem().unwrap().to_string_lossy().into()),
                 )
             };
-            let (event_info, event_packs): (Hash, Vec<Event>) = unzip_some(
+            let (event_info, event_packs): (Map, Vec<Event>) = unzip_some(
                 glob::glob(event_info_root.join("*.info.yml").to_str().unwrap())?
                     .filter_map(Result::ok)
                     .collect::<Vec<_>>()
                     .into_par_iter()
                     .map(
                         |file| -> Result<(
-                            std::collections::btree_map::IntoIter<String, Byml>,
+                            std::collections::hash_map::IntoIter<
+                                smartstring::alias::String,
+                                roead::byml::Byml,
+                            >,
                             Option<Event>,
                         )> { Event::new(self, &file) },
                     )
@@ -422,7 +425,7 @@ impl Builder {
                 .any(|p| p.starts_with(&event_info_root))
             {
                 println!("Building event info");
-                let data = Byml::Hash(event_info).to_binary(self.endian());
+                let data = Byml::Map(event_info).to_binary(self.endian());
                 self.set_resource_size("Event/EventInfo.product.byml", &data);
                 self.compiled
                     .write()
@@ -436,7 +439,7 @@ impl Builder {
                     .into_par_iter()
                     .try_for_each(|e| -> Result<()> {
                         std::fs::write(
-                            output_pack_dir.join(&jstr!("{&e.name}.sbeventpack")),
+                            output_pack_dir.join(jstr!("{&e.name}.sbeventpack")),
                             e.build()?,
                         )?;
                         Ok(())
@@ -478,10 +481,15 @@ impl Builder {
                     .into_par_iter()
                     .try_for_each(|f| -> Result<()> {
                         let text = fs::read_to_string(&f)?;
-                        let msyt: msyt::Msyt = serde_yaml::from_str(&text)
-                            .with_context(|| f.to_slash_lossy().to_string())?;
+                        let msyt: msyt::Msyt = serde_yml::from_str(&text)
+                            .with_context(|| f.to_slash_lossy().to_string())
+                            .or_else(|e| {
+                                let deser = serde_yml::Deserializer::from_str(&text);
+                                serde_yml::with::singleton_map_recursive::deserialize(deser)
+                                    .context(e)
+                            })?;
                         message_sarc.lock().unwrap().add_file(
-                            &f.strip_prefix(&dir)?
+                            f.strip_prefix(&dir)?
                                 .with_extension("msbt")
                                 .to_slash_lossy(),
                             msyt.into_msbt_bytes(endian)
@@ -514,7 +522,7 @@ impl Builder {
         };
         let align_path = sarc_path.join(".align");
         if align_path.exists() {
-            sarc.set_alignment(fs::read_to_string(align_path)?.parse::<u8>()?);
+            sarc.set_min_alignment(fs::read_to_string(align_path)?.parse::<u8>()?.into());
         }
         if sarc_path.file_name() == Some(std::ffi::OsStr::new("TitleBG.pack")) {
             for (path, data) in self.compiled.read().iter().filter_map(|(path, data)| {
@@ -525,13 +533,13 @@ impl Builder {
         } else if sarc_path.file_name() == Some(std::ffi::OsStr::new("Bootup.pack")) {
             if let Ok(data) = self.get_resource_data(Path::new("Event/EventInfo.product.sbyml")) {
                 sarc.add_file("Event/EventInfo.product.sbyml", data);
-            } else if !sarc.contains("Event/EventInfo.product.sbyml") {
+            } else if sarc.get_file("Event/EventInfo.product.sbyml").is_none() {
                 anyhow::bail!("No event info???")
             }
         };
         self.modified_files
             .iter()
-            .filter_map(|f| f.strip_prefix(&sarc_path).ok())
+            .filter_map(|f| f.strip_prefix(sarc_path).ok())
             .filter(|f| {
                 f.ancestors()
                     .skip(1)
@@ -551,9 +559,9 @@ impl Builder {
             .try_for_each(|f| -> Result<()> {
                 let add_path = jstr!(r#"{prefix}{&f.strip_prefix(&sarc_path)?.to_slash_lossy().trim_end_matches(".yml")}"#);
                 let data = if f.is_dir() && SARC_EXTS.contains(&f.extension()) {
-                    let mut sarc_writer = if sarc.contains(&*add_path) {
-                        SarcWriter::from(Sarc::read(
-                            sarc.get_file_data(&add_path).context("Uh??")?,
+                    let mut sarc_writer = if let Some(data) = sarc.get_file(&*add_path) {
+                        SarcWriter::from_sarc(&Sarc::new(
+                            data
                         )?)
                     } else {
                         SarcWriter::new(self.endian())
@@ -579,7 +587,7 @@ impl Builder {
                 );
                 Ok(())
             })?;
-        if !sarc.is_empty() {
+        if !sarc.files.is_empty() {
             Ok(sarc.to_binary())
         } else {
             Ok(vec![])
@@ -606,10 +614,10 @@ impl Builder {
                 ));
                 let out = self
                     .output
-                    .join(&root)
+                    .join(root)
                     .join(pack.strip_prefix(&source_root)?);
                 let mut sarc = if out.exists() {
-                    SarcWriter::from(Sarc::read(fs::read(&out)?)?)
+                    SarcWriter::from_sarc(&Sarc::new(fs::read(&out)?)?)
                 } else {
                     SarcWriter::new(self.endian())
                 };
@@ -643,7 +651,7 @@ impl Builder {
                             .join(root)
                             .join("Map")
                             .join(f.strip_prefix(&map_dir)?);
-                        fs::create_dir_all(&out.parent().context("No parent??")?)?;
+                        fs::create_dir_all(out.parent().context("No parent??")?)?;
                         fs::write(
                             if out.extension() == yml_ext {
                                 out.with_extension("")
@@ -690,11 +698,11 @@ impl Builder {
                 let out = self.output.join(f.strip_prefix(&self.source)?);
                 fs::create_dir_all(out.parent().context("No parent???")?)?;
                 if let Some(canon) = self.get_canon_name(f) {
-                    let data = fs::read(&f)?;
+                    let data = fs::read(f)?;
                     self.set_resource_size(&canon, &data);
                     fs::write(&out, data)?;
                 } else {
-                    fs::copy(&f, &out)?;
+                    fs::copy(f, &out)?;
                 }
                 Ok(())
             })?;
@@ -787,6 +795,7 @@ impl Builder {
 
 const CRC32: crc::Crc<u32> = crc::Crc::<u32>::new(&crc::CRC_32_ISO_HDLC);
 
+#[inline]
 fn hash_name(name: &str) -> u32 {
     CRC32.checksum(name.as_bytes())
 }

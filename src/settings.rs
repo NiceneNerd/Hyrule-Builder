@@ -225,7 +225,7 @@ impl Settings {
         println!("Loading BCML settings...");
         let bcml_path = dirs2::data_local_dir().unwrap().join("bcml/settings.json");
         let settings: serde_json::Value = serde_json::from_reader(
-            std::fs::File::open(&bcml_path).context("Missing BCML settings file")?,
+            std::fs::File::open(bcml_path).context("Missing BCML settings file")?,
         )?;
         let settings_map = settings.as_object().context("Invalid BCML settings")?;
         self.game_dir = settings_map
@@ -258,10 +258,10 @@ impl Settings {
         if !path.exists() {
             let settings = Self::default();
             std::fs::create_dir_all(path.parent().unwrap())?;
-            std::fs::write(path, serde_yaml::to_string(&settings)?)?;
+            std::fs::write(path, serde_yml::to_string(&settings)?)?;
             Ok(settings)
         } else {
-            Ok(serde_yaml::from_reader(&std::fs::File::open(path)?)?)
+            Ok(serde_yml::from_reader(&std::fs::File::open(path)?)?)
         }
     }
 
@@ -270,6 +270,6 @@ impl Settings {
         if !path.exists() {
             std::fs::create_dir_all(path.parent().unwrap())?;
         }
-        Ok(serde_yaml::to_writer(&std::fs::File::create(path)?, self)?)
+        Ok(serde_yml::to_writer(&std::fs::File::create(path)?, self)?)
     }
 }

@@ -86,7 +86,7 @@ By default, when you build a project, the output files will be stored in the `bu
 project. For full information on building and its options, consult the usage info below:
 
 ```none
-hyrule_builder build 0.9.0
+hyrule_builder build 0.10.0
 Build a mod from a source-like structure into binary game files 
 Note: Flags can be set using a config.yml file. See readme for details
 

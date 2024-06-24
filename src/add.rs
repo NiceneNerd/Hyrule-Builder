@@ -2,7 +2,7 @@ use crate::{settings::Settings, unbuilder::Unbuilder};
 use anyhow::{anyhow, Context, Result};
 use join_str::jstr;
 use roead::{
-    aamp::{hash_name, Parameter, ParameterIO},
+    aamp::{hash_name, Parameter, ParameterIO, ParameterListing},
     byml::Byml,
     sarc::Sarc,
     yaz0::decompress,
@@ -103,27 +103,27 @@ impl AddCommand {
             .context("Game directory not set")?
             .join(jstr!("Actor/Pack/{&base_actor}.sbactorpack"));
             println!("Loading base actor pack...");
-            let sarc = Sarc::read(decompress(fs::read(&base_pack).with_context(|| {
-                format!("Base pack not found at {}", base_pack.display())
-            })?)?)?;
+            let sarc = Sarc::new(
+                fs::read(&base_pack)
+                    .with_context(|| format!("Base pack not found at {}", base_pack.display()))?,
+            )?;
             let actorlink = Some(jstr!("Actor/ActorLink/{&base_actor}.bxml"));
             println!("Cloning actor files...");
-            for (file, data) in sarc.into_files().into_iter() {
-                let (is_yml, out_data) = match &data[..4] {
+            for file in sarc.files() {
+                let (is_yml, out_data) = match &file.data[..4] {
                     b"AAMP" => (true, {
-                        let mut pio = ParameterIO::from_binary(&data)?;
+                        let mut pio = ParameterIO::from_binary(file.data)?;
                         if let Some(new_actor) = new_actor {
-                            if file == actorlink {
+                            if file.name == actorlink.as_deref() {
                                 for link in super::builder::actor::ACTOR_LINKS.keys() {
                                     if let Some(target) = pio
-                                        .objects
-                                        .get_mut(hash_name("LinkTarget"))
+                                        .object_mut(hash_name("LinkTarget"))
                                         .context("Actor link missing LinkTarget")?
-                                        .0
-                                        .get_mut(link)
+                                        .get_mut(*link)
                                     {
-                                        if target.as_string()? != "Dummy" {
-                                            *target = Parameter::StringRef(new_actor.clone());
+                                        if target.as_str()? != "Dummy" {
+                                            *target =
+                                                Parameter::StringRef(new_actor.as_str().into());
                                         }
                                     }
                                 }
@@ -133,12 +133,12 @@ impl AddCommand {
                     }),
                     b"BY\x00\x02" | b"YB\x02\x00" => (
                         true,
-                        Byml::from_binary(&data)?.to_text().as_bytes().to_vec(),
+                        Byml::from_binary(file.data)?.to_text().as_bytes().to_vec(),
                     ),
-                    _ => (false, data),
+                    _ => (false, file.data.to_vec()),
                 };
-                let out = if !minimal || file == actorlink {
-                    let path = Path::new(file.as_ref().unwrap());
+                let out = if !minimal || file.name == actorlink.as_deref() {
+                    let path = Path::new(file.name.unwrap());
                     let ext = path.extension().context("No extension")?.to_str().unwrap();
                     if is_yml {
                         project.join(path.with_file_name(&jstr!(
@@ -150,7 +150,7 @@ impl AddCommand {
                         )))
                     }
                 } else {
-                    project.join(file.context("No file name")?)
+                    project.join(file.name.context("No file name")?)
                 };
                 if !out.exists() {
                     fs::create_dir_all(out.parent().unwrap())?;
@@ -164,12 +164,12 @@ impl AddCommand {
                     return Err(anyhow!("Cannot clone actor without actor info in mod"));
                 } else {
                     let mut info = Byml::from_text(
-                        &fs::read_to_string(actorinfo_root.join(&jstr!("{&base_actor}.info.yml")))
+                        fs::read_to_string(actorinfo_root.join(jstr!("{&base_actor}.info.yml")))
                             .context("Base actor info not found")?,
                     )?;
-                    info["name"] = Byml::String(new_actor.clone());
+                    info["name"] = Byml::String(new_actor.into());
                     fs::write(
-                        actorinfo_root.join(&jstr!("{&new_actor}.info.yml")),
+                        actorinfo_root.join(jstr!("{&new_actor}.info.yml")),
                         info.to_text(),
                     )?;
                     println!("Successfully cloned {} as {}", base_actor, new_actor);
@@ -216,7 +216,7 @@ impl AddCommand {
             println!("Loading map...");
             let map_path = Path::new("Map")
                 .join(if *aocfield { "AocField" } else { "MainField" })
-                .join(&jstr!("{&unit}/{&unit}_{&map_type}.smubin"));
+                .join(jstr!("{&unit}/{&unit}_{&map_type}.smubin"));
             let source = if be {
                 config.dlc_dir.or(config.update_dir)
             } else {
@@ -224,7 +224,7 @@ impl AddCommand {
             }
             .context("Game directories not set")?
             .join(&map_path);
-            let mubin = Byml::from_binary(&decompress(fs::read(&source)?)?)?;
+            let mubin = Byml::from_binary(decompress(fs::read(source)?)?)?;
             let out = project
                 .join(if be {
                     "aoc/0010"
@@ -260,34 +260,31 @@ impl AddCommand {
             .context("Game directory not set")?
             .join(jstr!("Event/{&base_event}.sbeventpack"));
             println!("Loading base event pack...");
-            let sarc = Sarc::read(decompress(fs::read(&base_pack).with_context(|| {
+            let sarc = Sarc::new(decompress(fs::read(&base_pack).with_context(|| {
                 format!("Base pack not found at {}", base_pack.display())
             })?)?)?;
             for (file, data) in sarc
-                .into_files()
-                .into_iter()
-                .filter_map(|(f, d)| f.map(|n| (n, d)))
+                .files()
+                .filter_map(|file| file.name.map(|n| (n, file.data)))
             {
                 let (is_yml, out_data) = match &data[..4] {
                     b"AAMP" => (true, {
-                        ParameterIO::from_binary(&data)?
+                        ParameterIO::from_binary(data)?
                             .to_text()
                             .as_bytes()
                             .to_vec()
                     }),
-                    b"BY\x00\x02" | b"YB\x02\x00" => (
-                        true,
-                        Byml::from_binary(&data)?.to_text().as_bytes().to_vec(),
-                    ),
-                    _ => (false, data),
+                    b"BY\x00\x02" | b"YB\x02\x00" => {
+                        (true, Byml::from_binary(data)?.to_text().as_bytes().to_vec())
+                    }
+                    _ => (false, data.to_vec()),
                 };
-                let file = PathBuf::from(
-                    if new_event.is_some() && !minimal && file.contains(base_event) {
-                        file.replace(base_event, new_event.as_ref().unwrap())
-                    } else {
-                        file
-                    },
-                );
+                let file: PathBuf = if new_event.is_some() && !minimal && file.contains(base_event)
+                {
+                    file.replace(base_event, new_event.as_ref().unwrap()).into()
+                } else {
+                    file.into()
+                };
                 let ext = file.extension().unwrap().to_str().unwrap();
                 let out = project.join(if is_yml {
                     file.with_extension(&jstr!("{ext}.yml"))
@@ -306,7 +303,7 @@ impl AddCommand {
                     return Err(anyhow!("Cannot clone event without event info in mod"));
                 } else {
                     let mut info = Byml::from_text(
-                        &fs::read_to_string(eventinfo_root.join(&jstr!("{&base_event}.info.yml")))
+                        fs::read_to_string(eventinfo_root.join(jstr!("{&base_event}.info.yml")))
                             .context("Base event info not found")?,
                     )?;
                     if !minimal {
@@ -317,15 +314,14 @@ impl AddCommand {
                                         update_names(child, base_event, new_event);
                                     }
                                 }
-                                Byml::Hash(hash) => {
+                                Byml::Map(hash) => {
                                     for child in hash.values_mut() {
                                         update_names(child, base_event, new_event);
                                     }
                                 }
                                 Byml::String(old_value) => {
                                     if old_value.contains(base_event) {
-                                        *node =
-                                            Byml::String(old_value.replace(base_event, new_event));
+                                        *node = new_event.into();
                                     }
                                 }
                                 _ => (),
@@ -334,7 +330,7 @@ impl AddCommand {
                         update_names(&mut info, base_event, new_event);
                     }
                     fs::write(
-                        eventinfo_root.join(&jstr!("{&new_event}.info.yml")),
+                        eventinfo_root.join(jstr!("{&new_event}.info.yml")),
                         info.to_text(),
                     )?;
                     println!("Successfully cloned {} as {}", base_event, new_event);
@@ -359,7 +355,7 @@ impl AddCommand {
             }
             .context("Game directory not set")?
             .join(&rel_path);
-            let sarc = Sarc::read(fs::read(&base_path)?)?;
+            let sarc = Sarc::new(fs::read(base_path)?)?;
             let unbuilder = Unbuilder {
                 be,
                 output: &project,
