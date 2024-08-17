@@ -506,7 +506,7 @@ impl Builder {
                 let mut bootup_sarc = SarcWriter::new(self.endian());
                 bootup_sarc.add_file(&message_path, compress(message_bytes));
                 fs::write(
-                    pack_out.join(&jstr!("Bootup_{lang}.pack")),
+                    pack_out.join(jstr!("Bootup_{lang}.pack")),
                     bootup_sarc.to_binary(),
                 )?;
             }

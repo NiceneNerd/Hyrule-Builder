@@ -141,11 +141,11 @@ impl AddCommand {
                     let path = Path::new(file.name.unwrap());
                     let ext = path.extension().context("No extension")?.to_str().unwrap();
                     if is_yml {
-                        project.join(path.with_file_name(&jstr!(
+                        project.join(path.with_file_name(jstr!(
                             "{new_actor.as_ref().unwrap_or(base_actor)}.{ext}.yml"
                         )))
                     } else {
-                        project.join(path.with_file_name(&jstr!(
+                        project.join(path.with_file_name(jstr!(
                             "{new_actor.as_ref().unwrap_or(base_actor)}.{ext}"
                         )))
                     }
@@ -287,7 +287,7 @@ impl AddCommand {
                 };
                 let ext = file.extension().unwrap().to_str().unwrap();
                 let out = project.join(if is_yml {
-                    file.with_extension(&jstr!("{ext}.yml"))
+                    file.with_extension(jstr!("{ext}.yml"))
                 } else {
                     file
                 });

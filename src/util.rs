@@ -1,10 +1,10 @@
 use anyhow::{format_err, Context, Result};
 pub use botw_utils::extensions::{AAMP_EXTS, BYML_EXTS};
 use join_str::jstr;
-use once_cell::sync::Lazy;
 use path_slash::PathExt;
 use roead::aamp::ParameterIO;
 use std::path::Path;
+use std::sync::LazyLock;
 
 pub static PROCESSED_DIRS: &[&str] = &["Actor", "Event", "Map", "Pack"];
 
@@ -31,7 +31,7 @@ pub static EXCLUDE_RSTB: &[&str] = &[
     "py", "sh", "old", "stera",
 ];
 
-pub static SARC_EXTS: Lazy<Vec<Option<&'static std::ffi::OsStr>>> = Lazy::new(|| {
+pub static SARC_EXTS: LazyLock<Vec<Option<&'static std::ffi::OsStr>>> = LazyLock::new(|| {
     botw_utils::extensions::SARC_EXTS
         .iter()
         .map(|ext| Some(std::ffi::OsStr::new(ext)))
