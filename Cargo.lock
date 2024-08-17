@@ -154,7 +154,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "173901312e9850391d4d7c1318c4e099fdc037d61870fca427429830efdb4e5f"
 dependencies = [
  "array-init",
- "binrw_derive",
+ "binrw_derive 0.13.3",
+ "bytemuck",
+]
+
+[[package]]
+name = "binrw"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f36b7cb3ab9ff6a2858650d8dc360e783a5d14dc29594db48c56a3c233cc265"
+dependencies = [
+ "array-init",
+ "binrw_derive 0.14.0",
  "bytemuck",
 ]
 
@@ -163,6 +174,19 @@ name = "binrw_derive"
 version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb515fdd6f8d3a357c8e19b8ec59ef53880807864329b1cb1cba5c53bf76557e"
+dependencies = [
+ "either",
+ "owo-colors",
+ "proc-macro2 1.0.86",
+ "quote 1.0.36",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "binrw_derive"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "20ea7a8c5c8eeffffac6d54d172444e15beffac6f817fac714460a9a9aa88da3"
 dependencies = [
  "either",
  "owo-colors",
@@ -192,7 +216,7 @@ dependencies = [
  "include-flate",
  "once_cell",
  "regex",
- "roead",
+ "roead 0.25.3",
  "serde_json",
  "twox-hash",
 ]
@@ -524,7 +548,7 @@ dependencies = [
 
 [[package]]
 name = "hyrule-builder"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "botw-utils",
@@ -536,13 +560,13 @@ dependencies = [
  "glob",
  "join_str",
  "msyt",
- "parking_lot",
  "path-slash",
  "phf",
  "rayon",
- "roead",
+ "roead 1.0.0",
  "rstb",
  "rustc-hash 2.0.0",
+ "scc",
  "serde",
  "serde_json",
  "serde_yml",
@@ -1097,20 +1121,37 @@ version = "0.25.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4727c05997dc74a6fc4fb56acdc76aeb3bcbc409242f4b5a6bebd409b6dc3860"
 dependencies = [
+ "binrw 0.13.3",
+ "cxx",
+ "cxx-build",
+ "join_str",
+ "rustc-hash 1.1.0",
+ "smartstring",
+ "thiserror",
+]
+
+[[package]]
+name = "roead"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "caa4e7e992638f39b4ecbde6f11e02dfbcf81dae42954ee5fba32111dd9e39ce"
+dependencies = [
  "almost",
  "base64 0.22.1",
- "binrw",
+ "binrw 0.14.0",
  "cxx",
  "cxx-build",
  "indexmap 2.2.6",
  "join_str",
  "lexical",
+ "lexical-core",
  "num-integer",
  "num-traits",
- "once_cell",
  "parking_lot",
- "rustc-hash 1.1.0",
+ "rustc-hash 2.0.0",
+ "rustc_version",
  "ryml",
+ "scc",
  "serde",
  "serde_json",
  "smartstring",
@@ -1149,6 +1190,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "583034fd73374156e66797ed8e5b0d5690409c9226b22d87cb7f19821c05d152"
 
 [[package]]
+name = "rustc_version"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bfa0f585226d2e68097d4f95d113b15b83a82e819ab25717ec0590d9584ef366"
+dependencies = [
+ "semver",
+]
+
+[[package]]
 name = "rustix"
 version = "0.38.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1181,6 +1231,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f3cb5ba0dc43242ce17de99c180e96db90b235b8a9fdc9543c96d2209116bd9f"
 
 [[package]]
+name = "scc"
+version = "2.1.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aeb7ac86243095b70a7920639507b71d51a63390d1ba26c4f60a552fbb914a37"
+dependencies = [
+ "sdd",
+]
+
+[[package]]
 name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1191,6 +1250,18 @@ name = "scratch"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a3cf7c11c38cb994f3d40e8a8cde3bbd1f72a435e4c49e85d6553d8312306152"
+
+[[package]]
+name = "sdd"
+version = "3.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0495e4577c672de8254beb68d01a9b62d0e8a13c099edecdbedccce3223cd29f"
+
+[[package]]
+name = "semver"
+version = "1.0.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61697e0a1c7e512e84a621326239844a24d8207b4669b41bc18b32ea5cbf988b"
 
 [[package]]
 name = "serde"

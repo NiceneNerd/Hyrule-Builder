@@ -12,7 +12,6 @@ use botw_utils::{get_canon_name, get_canon_name_without_root, hashes::StockHashT
 use colored::*;
 use fs_err as fs;
 use join_str::jstr;
-use parking_lot::RwLock;
 use path_slash::{PathBufExt, PathExt};
 use rayon::prelude::*;
 use roead::{
@@ -23,10 +22,11 @@ use roead::{
     Endian,
 };
 use rstb::ResourceSizeTable;
-use rustc_hash::FxHashMap as HashMap;
+use rustc_hash::{FxBuildHasher, FxHashMap as HashMap};
+use scc::{HashMap as SyncMap, HashSet};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::BTreeMap,
     ffi::OsStr,
     io::Write,
     path::{Path, PathBuf},
@@ -59,12 +59,12 @@ pub struct Builder {
     pub content: PathBuf,
     pub aoc: PathBuf,
     pub file_times: HashMap<PathBuf, u64>,
-    pub modified_files: HashSet<PathBuf>,
+    pub modified_files: HashSet<PathBuf, FxBuildHasher>,
     pub hash_table: StockHashTable,
-    pub compiled: Arc<RwLock<HashMap<PathBuf, Vec<u8>>>>,
+    pub compiled: SyncMap<PathBuf, Vec<u8>, FxBuildHasher>,
     pub size_table: Arc<Mutex<ResourceSizeTable>>,
-    pub title_actors: HashSet<String>,
-    pub title_events: HashSet<String>,
+    pub title_actors: HashSet<String, FxBuildHasher>,
+    pub title_events: HashSet<String, FxBuildHasher>,
     pub actorinfo: Option<Hash>,
     pub meta: HashMap<String, String>,
     pub warn: WarnLevel,
@@ -128,7 +128,7 @@ impl Builder {
     }
 
     fn get_resource_data(&self, file: &Path) -> Result<Vec<u8>> {
-        if let Some(data) = self.compiled.read().get(file) {
+        if let Some(data) = self.compiled.get(file) {
             return Ok(data.clone());
         }
         let bytes = std::fs::read(file)
@@ -189,7 +189,7 @@ impl Builder {
         } else {
             data
         };
-        self.compiled.write().insert(file.to_owned(), data.to_vec());
+        let _ = self.compiled.insert(file.to_owned(), data.to_vec());
         Ok(data)
     }
 
@@ -233,26 +233,32 @@ impl Builder {
                     .collect::<Result<Vec<(PathBuf, u64)>>>()?,
             );
         }
-        self.modified_files = glob::glob(self.source.join("**/*").to_str().context("Bad glob")?)?
-            .filter_map(Result::ok)
-            .filter(|f| f.is_file() && f.file_name() != Some(OsStr::new(".db")))
-            .filter(|file| {
-                !self.file_times.contains_key(file) || {
-                    fs::metadata(file)
-                        .unwrap()
-                        .modified()
-                        .unwrap()
-                        .duration_since(
-                            std::time::UNIX_EPOCH
-                                .checked_add(std::time::Duration::from_secs(
-                                    *self.file_times.get(file).unwrap(),
-                                ))
-                                .unwrap(),
-                        )
-                        .is_ok()
-                }
-            })
-            .collect();
+        self.modified_files = {
+            let files = HashSet::default();
+            for file in glob::glob(self.source.join("**/*").to_str().context("Bad glob")?)?
+                .filter_map(Result::ok)
+                .filter(|f| f.is_file() && f.file_name() != Some(OsStr::new(".db")))
+                .filter(|file| {
+                    !self.file_times.contains_key(file) || {
+                        fs::metadata(file)
+                            .unwrap()
+                            .modified()
+                            .unwrap()
+                            .duration_since(
+                                std::time::UNIX_EPOCH
+                                    .checked_add(std::time::Duration::from_secs(
+                                        *self.file_times.get(file).unwrap(),
+                                    ))
+                                    .unwrap(),
+                            )
+                            .is_ok()
+                    }
+                })
+            {
+                let _ = files.insert(file);
+            }
+            files
+        };
         Ok(())
     }
 
@@ -300,11 +306,7 @@ impl Builder {
 
     fn build_actors(&mut self) -> Result<()> {
         let actor_root = self.source_content().join("Actor");
-        if self
-            .modified_files
-            .par_iter()
-            .any(|p| p.starts_with(&actor_root))
-        {
+        if self.modified_files.any(|p| p.starts_with(&actor_root)) {
             println!("Checking actor packs");
             let modded_actors: Vec<Actor> =
                 glob::glob(actor_root.join("ActorLink/*.bxml.yml").to_str().unwrap())?
@@ -343,7 +345,9 @@ impl Builder {
                         ))
                     })
                     .collect::<Result<Vec<_>>>()?;
-                self.compiled.write().par_extend(built_title_actors);
+                for (path, data) in built_title_actors {
+                    let _ = self.compiled.insert(path, data);
+                }
             }
         }
         Ok(())
@@ -395,11 +399,12 @@ impl Builder {
             println!("Checking events");
             let title_event_path = self.source_content().join("Pack/TitleBG.pack/EventFlow");
             if title_event_path.exists() {
-                self.title_events.extend(
-                    glob::glob(title_event_path.join("*.bfevfl").to_str().unwrap())?
-                        .flat_map(Result::ok)
-                        .map(|f| f.file_stem().unwrap().to_string_lossy().into()),
-                )
+                for file in glob::glob(title_event_path.join("*.bfevfl").to_str().unwrap())?
+                    .flat_map(Result::ok)
+                    .map(|f| f.file_stem().unwrap().to_string_lossy().into())
+                {
+                    let _ = self.title_events.insert(file);
+                }
             };
             let (event_info, event_packs): (Map, Vec<Event>) = unzip_some(
                 glob::glob(event_info_root.join("*.info.yml").to_str().unwrap())?
@@ -419,16 +424,12 @@ impl Builder {
                     .into_par_iter()
                     .map(|(i, e)| (Some(i), e)),
             );
-            if self
-                .modified_files
-                .par_iter()
-                .any(|p| p.starts_with(&event_info_root))
-            {
+            if self.modified_files.any(|p| p.starts_with(&event_info_root)) {
                 println!("Building event info");
                 let data = Byml::Map(event_info).to_binary(self.endian());
                 self.set_resource_size("Event/EventInfo.product.byml", &data);
-                self.compiled
-                    .write()
+                let _ = self
+                    .compiled
                     .insert("Event/EventInfo.product.sbyml".into(), compress(data));
             }
             if !event_packs.is_empty() {
@@ -451,11 +452,7 @@ impl Builder {
 
     fn build_texts(&self) -> Result<()> {
         let message_root = self.source_content().join("Message");
-        if self
-            .modified_files
-            .par_iter()
-            .any(|f| f.starts_with(&message_root))
-        {
+        if self.modified_files.any(|f| f.starts_with(&message_root)) {
             let pack_out = self.out_content().join("Pack");
             fs::create_dir_all(&pack_out)?;
             for dir in fs::read_dir(&message_root)?
@@ -525,11 +522,11 @@ impl Builder {
             sarc.set_min_alignment(fs::read_to_string(align_path)?.parse::<u8>()?.into());
         }
         if sarc_path.file_name() == Some(std::ffi::OsStr::new("TitleBG.pack")) {
-            for (path, data) in self.compiled.read().iter().filter_map(|(path, data)| {
-                path.strip_prefix("TitleBG.pack").ok().map(|p| (p, data))
-            }) {
-                sarc.add_file(path.to_str().unwrap(), data.clone());
-            }
+            self.compiled.scan(|path, data| {
+                if let Ok(path) = path.strip_prefix("TitleBG.pack") {
+                    sarc.add_file(path.to_str().unwrap(), data.clone());
+                }
+            });
         } else if sarc_path.file_name() == Some(std::ffi::OsStr::new("Bootup.pack")) {
             if let Ok(data) = self.get_resource_data(Path::new("Event/EventInfo.product.sbyml")) {
                 sarc.add_file("Event/EventInfo.product.sbyml", data);
@@ -537,25 +534,29 @@ impl Builder {
                 anyhow::bail!("No event info???")
             }
         };
-        self.modified_files
-            .iter()
-            .filter_map(|f| f.strip_prefix(sarc_path).ok())
-            .filter(|f| {
-                f.ancestors()
+        let mut files = Vec::with_capacity(self.modified_files.len());
+        self.modified_files.scan(|f| {
+            if let Ok(file) = f.strip_prefix(sarc_path) {
+                if file
+                    .ancestors()
                     .skip(1)
                     .all(|s| !SARC_EXTS.contains(&s.extension()))
-                    && !f
+                    && !file
                         .file_name()
                         .and_then(|n| n.to_str())
                         .map(|n| n.starts_with('.'))
                         .unwrap_or(true)
-            })
-            .map(|f| sarc_path.join(f))
-            .chain(
-                glob::glob(&sarc_path.join("**/*.*").to_string_lossy())?
-                    .filter_map(Result::ok)
-                    .filter(|f| f.is_dir()),
-            )
+                {
+                    files.push(sarc_path.join(file))
+                }
+            }
+        });
+        files.extend(
+            glob::glob(&sarc_path.join("**/*.*").to_string_lossy())?
+                .filter_map(Result::ok)
+                .filter(|f| f.is_dir()),
+        );
+        files.into_iter()
             .try_for_each(|f| -> Result<()> {
                 let add_path = jstr!(r#"{prefix}{&f.strip_prefix(&sarc_path)?.to_slash_lossy().trim_end_matches(".yml")}"#);
                 let data = if f.is_dir() && SARC_EXTS.contains(&f.extension()) {
@@ -601,7 +602,7 @@ impl Builder {
                 .filter_map(Result::ok)
                 .filter(|f| {
                     SARC_EXTS.contains(&f.extension())
-                        && self.modified_files.par_iter().any(|mf| mf.starts_with(f))
+                        && self.modified_files.any(|mf| mf.starts_with(f))
                 })
                 .collect::<Vec<_>>();
             println!("Building {} packs", packs.len());
@@ -632,36 +633,35 @@ impl Builder {
     fn build_maps(&self) -> Result<()> {
         for root in [&self.aoc, &self.content] {
             let map_dir = self.source.join(root).join("Map");
-            if self
-                .modified_files
-                .par_iter()
-                .any(|f| f.starts_with(&map_dir))
-            {
+            if self.modified_files.any(|f| f.starts_with(&map_dir)) {
                 println!(
                     "Building {} maps",
                     if root == &self.aoc { "DLC" } else { "base" }
                 );
                 let yml_ext = Some(OsStr::new("yml"));
-                self.modified_files
-                    .par_iter()
-                    .filter(|f| f.starts_with(&map_dir))
-                    .try_for_each(|f| -> Result<()> {
-                        let out = self
-                            .output
-                            .join(root)
-                            .join("Map")
-                            .join(f.strip_prefix(&map_dir)?);
-                        fs::create_dir_all(out.parent().context("No parent??")?)?;
-                        fs::write(
-                            if out.extension() == yml_ext {
-                                out.with_extension("")
-                            } else {
-                                out
-                            },
-                            self.get_resource_data(f)?,
-                        )?;
-                        Ok(())
-                    })?;
+                let mut files = Vec::with_capacity(self.modified_files.len());
+                self.modified_files.scan(|f| {
+                    if f.starts_with(&map_dir) {
+                        files.push(f.clone())
+                    }
+                });
+                files.into_par_iter().try_for_each(|f| -> Result<()> {
+                    let out = self
+                        .output
+                        .join(root)
+                        .join("Map")
+                        .join(f.strip_prefix(&map_dir)?);
+                    fs::create_dir_all(out.parent().context("No parent??")?)?;
+                    fs::write(
+                        if out.extension() == yml_ext {
+                            out.with_extension("")
+                        } else {
+                            out
+                        },
+                        self.get_resource_data(&f)?,
+                    )?;
+                    Ok(())
+                })?;
             }
         }
         Ok(())
@@ -673,7 +673,7 @@ impl Builder {
             phys_root.join("StaticCompound"),
             phys_root.join("TeraMeshRigidBody"),
         );
-        let misc_files: Vec<&PathBuf> = [&self.aoc, &self.content]
+        let misc_files: Vec<PathBuf> = [&self.aoc, &self.content]
             .into_iter()
             .flat_map(|r| {
                 UNPROCESSED_DIRS
@@ -682,10 +682,13 @@ impl Builder {
                     .collect::<Vec<PathBuf>>()
             })
             .flat_map(|s| {
-                self.modified_files
-                    .par_iter()
-                    .filter(|f| f.starts_with(&s))
-                    .collect::<Vec<&PathBuf>>()
+                let mut files = vec![];
+                self.modified_files.scan(|f| {
+                    if f.starts_with(&s) {
+                        files.push(f.clone());
+                    }
+                });
+                files
             })
             .filter(|f| {
                 !f.starts_with(&phys_root)
@@ -697,7 +700,7 @@ impl Builder {
             misc_files.into_par_iter().try_for_each(|f| -> Result<()> {
                 let out = self.output.join(f.strip_prefix(&self.source)?);
                 fs::create_dir_all(out.parent().context("No parent???")?)?;
-                if let Some(canon) = self.get_canon_name(f) {
+                if let Some(canon) = self.get_canon_name(&f) {
                     let data = fs::read(f)?;
                     self.set_resource_size(&canon, &data);
                     fs::write(&out, data)?;
@@ -730,8 +733,9 @@ impl Builder {
         let moment = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_secs();
-        self.file_times
-            .extend(self.modified_files.iter().map(|f| (f.clone(), moment)));
+        self.modified_files.scan(|f| {
+            self.file_times.insert(f.clone(), moment);
+        });
         let mut db = std::fs::File::create(self.source.join(".db"))?;
         for (f, t) in &self.file_times {
             writeln!(
@@ -804,10 +808,11 @@ fn hash_name(name: &str) -> u32 {
 mod tests {
     use super::{Builder, WarnLevel};
     use botw_utils::hashes::{Platform, StockHashTable};
-    use parking_lot::RwLock;
     use rstb::ResourceSizeTable;
+    use rustc_hash::FxBuildHasher;
+    use scc::{HashMap as SyncMap, HashSet};
     use std::{
-        collections::{HashMap, HashSet},
+        collections::HashMap,
         path::PathBuf,
         sync::{Arc, Mutex},
     };
@@ -848,7 +853,7 @@ mod tests {
             be: true,
             file_times: HashMap::default(),
             meta: HashMap::default(),
-            modified_files: HashSet::new(),
+            modified_files: HashSet::with_hasher(FxBuildHasher),
             actorinfo: None,
             hash_table: StockHashTable::new(&Platform::WiiU),
             size_table: Arc::new(Mutex::new(ResourceSizeTable::new_from_stock(
@@ -858,16 +863,25 @@ mod tests {
             aoc: PathBuf::from("aoc/0010"),
             output: "test/project/build".into(),
             source: "test/project".into(),
-            title_actors: super::actor::TITLE_ACTORS
-                .iter()
-                .map(|t| t.to_string())
-                .collect(),
-            title_events: super::event::TITLE_EVENTS
-                .iter()
-                .chain(super::event::NESTED_EVENTS.iter())
-                .map(|t| t.to_string())
-                .collect(),
-            compiled: Arc::new(RwLock::new(HashMap::default())),
+            title_actors: {
+                let actors = HashSet::default();
+                for actor in super::actor::TITLE_ACTORS.iter().map(|t| t.to_string()) {
+                    let _ = actors.insert(actor);
+                }
+                actors
+            },
+            title_events: {
+                let events = HashSet::default();
+                for event in super::event::TITLE_EVENTS
+                    .iter()
+                    .chain(super::event::NESTED_EVENTS.iter())
+                    .map(|t| t.to_string())
+                {
+                    let _ = events.insert(event);
+                }
+                events
+            },
+            compiled: SyncMap::with_hasher(FxBuildHasher),
             verbose: false,
             warn: WarnLevel::Warn,
         }

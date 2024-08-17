@@ -118,7 +118,6 @@ impl<'a> Event<'a> {
                 .filter(|f| {
                     !builder
                         .title_events
-                        .iter()
                         .any(|e| f.file_name().unwrap().to_str().unwrap().contains(e))
                 })
                 .any(|f| !f.exists())
@@ -151,7 +150,6 @@ impl<'a> Event<'a> {
                 if !self
                     .builder
                     .title_events
-                    .iter()
                     .any(|e| f.file_name().unwrap().to_str().unwrap().contains(e))
                     && !root.join("Pack/TitleBG.pack").join(&filename).exists()
                 {

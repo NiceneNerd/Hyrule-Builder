@@ -1,6 +1,6 @@
 [package]
 name = "hyrule-builder"
-version = "0.10.0"
+version = "0.11.0"
 edition = "2021"
 readme = "README.md"
 rust-version = "1.80"
@@ -17,12 +17,12 @@ join_str = "0.1.0"
 glob = "0.3"
 msyt = { git = "https://github.com/NiceneNerd/msyt", rev = "f5d0c6e33cc8d12d66f1dd0d329ecf00bcbb9c51" }
 path-slash = "0.2.1"
-parking_lot = "0.12"
 phf = { version = "0.11.2", features = ["macros"] }
 rayon = "1"
-roead = { version = "0.25.3", features = ["yaml"] }
+roead = { version = "1", features = ["yaml"] }
 rustc-hash = "2.0.0"
 rstb = { version = "1", features = ["botw-data", "json"] }
+scc = "2.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yml = "0.0.11"
@@ -32,4 +32,3 @@ structopt = "0.3.26"
 [profile.release]
 lto = "fat"
 codegen-units = 1
-panic = "abort"

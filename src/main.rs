@@ -8,11 +8,11 @@ use botw_utils::hashes::{Platform, StockHashTable};
 use builder::WarnLevel;
 use colored::*;
 use fs_err as fs;
-use parking_lot::RwLock;
 use roead::yaz0::decompress;
 use rstb::ResourceSizeTable;
+use rustc_hash::{FxBuildHasher, FxHashMap as HashMap};
+use scc::{HashMap as SyncMap, HashSet};
 use std::{
-    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
@@ -201,7 +201,7 @@ fn main() -> Result<()> {
                 be,
                 file_times: HashMap::default(),
                 meta,
-                modified_files: HashSet::new(),
+                modified_files: HashSet::with_hasher(FxBuildHasher),
                 actorinfo: None,
                 hash_table: StockHashTable::new(&if be {
                     Platform::WiiU
@@ -246,16 +246,34 @@ fn main() -> Result<()> {
                 }),
                 output,
                 source,
-                title_actors: title_actors
-                    .into_iter()
-                    .chain(builder::actor::TITLE_ACTORS.iter().map(|t| t.to_string()))
-                    .collect(),
-                title_events: builder::event::TITLE_EVENTS
-                    .iter()
-                    .chain(builder::event::NESTED_EVENTS.iter())
-                    .map(|t| t.to_string())
-                    .collect(),
-                compiled: Arc::new(RwLock::new(HashMap::default())),
+                title_actors: {
+                    let actors = HashSet::with_capacity_and_hasher(
+                        title_actors.len() + builder::actor::TITLE_ACTORS.len(),
+                        FxBuildHasher,
+                    );
+                    for actor in title_actors
+                        .into_iter()
+                        .chain(builder::actor::TITLE_ACTORS.iter().map(|t| t.to_string()))
+                    {
+                        let _ = actors.insert(actor);
+                    }
+                    actors
+                },
+                title_events: {
+                    let events = HashSet::with_capacity_and_hasher(
+                        builder::event::TITLE_EVENTS.len() + builder::event::NESTED_EVENTS.len(),
+                        FxBuildHasher,
+                    );
+                    for event in builder::event::TITLE_EVENTS
+                        .iter()
+                        .chain(builder::event::NESTED_EVENTS.iter())
+                        .map(|t| t.to_string())
+                    {
+                        let _ = events.insert(event);
+                    }
+                    events
+                },
+                compiled: SyncMap::with_hasher(FxBuildHasher),
                 verbose,
                 warn: if hard_warnings {
                     WarnLevel::Error
