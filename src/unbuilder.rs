@@ -207,7 +207,7 @@ impl Unbuilder<'_> {
 
     pub fn unbuild_actorinfo(&self, file: &Path) -> Result<()> {
         println!("Unbuilding actor info...");
-        let actorinfo = byml::Byml::from_binary(yaz0::decompress_if(&fs::read(file)?))?;
+        let actorinfo = byml::Byml::from_binary(fs::read(file)?)?;
         fs::create_dir_all(self.out_content().join("Actor/ActorInfo"))?;
         actorinfo
             .as_map()?

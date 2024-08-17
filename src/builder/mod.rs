@@ -688,8 +688,8 @@ impl Builder {
                     .collect::<Vec<&PathBuf>>()
             })
             .filter(|f| {
-                !(f.starts_with(&phys_root)
-                    || (f.starts_with(&phys_hksc) || f.starts_with(&phys_tmrb)))
+                !f.starts_with(&phys_root)
+                    || (f.starts_with(&phys_hksc) || f.starts_with(&phys_tmrb))
             })
             .collect();
         if !misc_files.is_empty() {
