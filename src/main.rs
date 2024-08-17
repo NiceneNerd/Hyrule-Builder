@@ -153,8 +153,11 @@ fn main() -> Result<()> {
             title_actors,
             source,
         } => {
-            let source = source.unwrap_or_else(|| {
-                std::env::current_dir().expect("There's no current working directory")
+            let source = source.map_or(
+                std::env::current_dir()
+                    .expect("There's no current working directory"),
+                |path| {
+                    dunce::canonicalize(path).expect("Provided path was invalid")
             });
             let config: Option<BuildConfig> = if source.join("config.yml").exists() {
                 Some(serde_yml::from_reader(&std::fs::File::open(
